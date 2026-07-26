@@ -1,0 +1,25 @@
+services:
+  blog:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - blog
+
+volumes:
+  caddy_data:
+  caddy_config:

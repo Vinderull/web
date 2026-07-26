@@ -1,0 +1,6 @@
+# Replace blog.example.com with your domain.
+# Caddy automatically provisions and renews Let's Encrypt TLS certs.
+blog.example.com {
+	encode zstd gzip
+	reverse_proxy blog:3000
+}
