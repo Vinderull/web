@@ -6,11 +6,11 @@ mod templates;
 use std::sync::Arc;
 
 use axum::{
+    Router,
     extract::{Path, State},
     http::StatusCode,
     response::Html,
     routing::get,
-    Router,
 };
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -100,7 +100,9 @@ async fn index(State(state): State<AppState>) -> Result<Html<String>, StatusCode
     let template = IndexTemplate {
         posts: &state.posts,
     };
-    let html = template.render().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let html = template
+        .render()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Html(html))
 }
 
@@ -114,6 +116,8 @@ async fn post(
         .find(|p| p.slug == slug)
         .ok_or(StatusCode::NOT_FOUND)?;
     let template = PostTemplate { post: p };
-    let html = template.render().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let html = template
+        .render()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Html(html))
 }

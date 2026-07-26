@@ -18,9 +18,7 @@ impl Config {
             content_dir: PathBuf::from(
                 env::var("CONTENT_DIR").unwrap_or_else(|_| "content".into()),
             ),
-            static_dir: PathBuf::from(
-                env::var("STATIC_DIR").unwrap_or_else(|_| "static".into()),
-            ),
+            static_dir: PathBuf::from(env::var("STATIC_DIR").unwrap_or_else(|_| "static".into())),
         })
     }
 }

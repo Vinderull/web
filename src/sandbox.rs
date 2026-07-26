@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 // ponytail: ABI V1 covers basic filesystem rights (read/write/execute).
 // Bump to V3+ after testing to also restrict truncate, ioctl_dev, etc.
@@ -9,8 +9,8 @@ mod linux {
     use super::*;
 
     use landlock::{
-        Access, AccessFs, AccessNet, CompatLevel, Compatible, LandlockStatus, PathBeneath,
-        PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, ABI,
+        ABI, Access, AccessFs, AccessNet, CompatLevel, Compatible, LandlockStatus, PathBeneath,
+        PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
     };
 
     pub fn apply(static_dir: &Path) -> Result<()> {

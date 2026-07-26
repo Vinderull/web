@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{Options, Parser, html};
 use serde::Deserialize;
 use time::macros::format_description;
 
@@ -45,11 +45,11 @@ pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
             .context("invalid filename")?
             .to_string();
 
-        let content =
-            std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
 
-        let post = parse_post(&slug, &content)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let post =
+            parse_post(&slug, &content).with_context(|| format!("parsing {}", path.display()))?;
         posts.push(post);
     }
 
@@ -59,8 +59,7 @@ pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
 
 fn parse_post(slug: &str, content: &str) -> Result<Post> {
     let (frontmatter, markdown) = split_frontmatter(content);
-    let fm: FrontMatter =
-        toml::from_str(&frontmatter).context("parsing frontmatter")?;
+    let fm: FrontMatter = toml::from_str(&frontmatter).context("parsing frontmatter")?;
 
     let html = render_markdown(markdown);
     let date_display = format_date(&fm.date)?;
@@ -89,8 +88,7 @@ fn split_frontmatter(content: &str) -> (String, &str) {
     match after_open.find(marker) {
         Some(end) => {
             let frontmatter = after_open[..end].to_string();
-            let markdown = after_open[end + marker.len()..]
-                .trim_start_matches(['\r', '\n']);
+            let markdown = after_open[end + marker.len()..].trim_start_matches(['\r', '\n']);
             (frontmatter, markdown)
         }
         None => (String::new(), content),
