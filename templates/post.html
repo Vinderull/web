@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.title }} - My Blog{% endblock %}
+
+{% block head %}
+{% if let Some(desc) = post.description %}
+<meta name="description" content="{{ desc }}">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<article>
+    <h2>{{ post.title }}</h2>
+    <time class="post-date">{{ post.date_display }}</time>
+    <div class="post-content">
+        {{ post.html|safe }}
+    </div>
+</article>
+<p><a href="/">&larr; Back to posts</a></p>
+{% endblock %}

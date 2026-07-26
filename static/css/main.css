@@ -1,0 +1,139 @@
+:root {
+    --max-width: 720px;
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --link: #0066cc;
+    --border: #ddd;
+    --code-bg: #f0f0f0;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+}
+
+header, main, footer {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+header {
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+}
+
+header h1 a {
+    color: var(--fg);
+    text-decoration: none;
+}
+
+main {
+    min-height: 60vh;
+}
+
+footer {
+    border-top: 1px solid var(--border);
+    margin-top: 2rem;
+    color: #666;
+    font-size: 0.9rem;
+}
+
+a {
+    color: var(--link);
+}
+
+.post-list {
+    list-style: none;
+}
+
+.post-list li {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.post-list a {
+    text-decoration: none;
+    color: var(--fg);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.post-list a:hover .post-title {
+    text-decoration: underline;
+}
+
+.post-date {
+    color: #666;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+article h2 {
+    margin-bottom: 0.5rem;
+}
+
+article .post-date {
+    display: block;
+    margin-bottom: 1.5rem;
+}
+
+.post-content h1,
+.post-content h2,
+.post-content h3 {
+    margin: 1.5rem 0 0.5rem;
+}
+
+.post-content p {
+    margin-bottom: 1rem;
+}
+
+.post-content pre {
+    background: var(--code-bg);
+    padding: 1rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+
+.post-content code {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.9rem;
+}
+
+.post-content :not(pre) > code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+
+.post-content ul,
+.post-content ol {
+    margin: 1rem 0;
+    padding-left: 2rem;
+}
+
+.post-content blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 1rem;
+    margin: 1rem 0;
+    color: #555;
+}
+
+.htmx-request .htmx-indicator {
+    opacity: 1;
+}
+
+.htmx-indicator {
+    opacity: 0;
+    transition: opacity 200ms ease-in;
+}
