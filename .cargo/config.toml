@@ -1,4 +1,5 @@
 [build]
+rustflags = ["-C", "target-cpu=native"]
 target = "x86_64-unknown-linux-musl"
 
 [target.x86_64-unknown-linux-musl]
