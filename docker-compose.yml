@@ -2,6 +2,7 @@ services:
   blog:
     build:
       context: .
+      dockerfile: .devcontainer/Dockerfile
       target: runtime
     restart: unless-stopped
     expose:

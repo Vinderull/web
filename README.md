@@ -81,7 +81,8 @@ Build the runtime image (uses the `runtime` stage of the multi-stage
 Dockerfile) and run it:
 
 ```bash
-docker build -t blog --target runtime .
+# The Dockerfile lives in .devcontainer/ — use -f to point to it
+docker build -t blog --target runtime -f .devcontainer/Dockerfile .
 docker run -p 3000:3000 blog
 # Server starts on http://localhost:3000
 ```
