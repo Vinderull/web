@@ -152,4 +152,140 @@ mod tests {
         assert!(html.contains("<h1>Title</h1>"));
         assert!(html.contains("<li>item 1</li>"));
     }
+
+    #[test]
+    fn test_split_frontmatter_unclosed() {
+        let input = "+++\ntitle = \"Test\"\n# no closing marker";
+        let (fm, md) = split_frontmatter(input);
+        assert!(fm.is_empty(), "unclosed frontmatter yields empty fm");
+        assert!(md.contains("no closing marker"));
+    }
+
+    #[test]
+    fn test_split_frontmatter_empty_block() {
+        let input = "+++\n+++\nBody here";
+        let (fm, md) = split_frontmatter(input);
+        assert!(fm.is_empty());
+        assert_eq!(md, "Body here");
+    }
+
+    #[test]
+    fn test_split_frontmatter_leading_whitespace() {
+        let input = "\n\n  +++\ntitle = \"T\"\n+++\nBody";
+        let (fm, md) = split_frontmatter(input);
+        assert!(fm.contains("title = \"T\""));
+        assert_eq!(md, "Body");
+    }
+
+    #[test]
+    fn test_parse_post_missing_title() {
+        let input = "+++\ndate = \"2024-01-15\"\n+++\nbody";
+        assert!(parse_post("s", input).is_err());
+    }
+
+    #[test]
+    fn test_parse_post_missing_date() {
+        let input = "+++\ntitle = \"T\"\n+++\nbody";
+        assert!(parse_post("s", input).is_err());
+    }
+
+    #[test]
+    fn test_parse_post_no_description_defaults_none() {
+        let input = "+++\ntitle = \"T\"\ndate = \"2024-01-15\"\n+++\nbody";
+        let post = parse_post("s", input).unwrap();
+        assert_eq!(post.description, None);
+    }
+
+    #[test]
+    fn test_parse_post_empty_body() {
+        let input = "+++\ntitle = \"T\"\ndate = \"2024-01-15\"\n+++\n";
+        let post = parse_post("s", input).unwrap();
+        assert!(post.html.trim().is_empty());
+    }
+
+    #[test]
+    fn test_format_date_valid() {
+        assert_eq!(format_date("2024-01-15").unwrap(), "January 15, 2024");
+        assert_eq!(format_date("2023-12-31").unwrap(), "December 31, 2023");
+    }
+
+    #[test]
+    fn test_format_date_invalid_format() {
+        assert!(format_date("01/15/2024").is_err());
+        assert!(format_date("not-a-date").is_err());
+        assert!(format_date("").is_err());
+    }
+
+    #[test]
+    fn test_render_markdown_table() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let html = render_markdown(md);
+        assert!(html.contains("<table>"));
+        assert!(html.contains("<td>1</td>"));
+    }
+
+    #[test]
+    fn test_render_markdown_strikethrough() {
+        let html = render_markdown("~~deleted~~");
+        assert!(html.contains("<del>deleted</del>"));
+    }
+
+    #[test]
+    fn test_render_markdown_code_block() {
+        let html = render_markdown("```\nlet x = 1;\n```");
+        assert!(html.contains("<code>"));
+        assert!(html.contains("let x = 1;"));
+    }
+
+    #[test]
+    fn test_render_markdown_tasklist() {
+        let html = render_markdown("- [x] done\n- [ ] todo");
+        assert!(
+            html.contains("task-list") || html.contains("checkbox") || html.contains("disabled")
+        );
+    }
+
+    #[test]
+    fn test_load_all_missing_dir() {
+        let dir = std::env::temp_dir().join("web_test_nonexistent_posts_dir");
+        let _ = std::fs::remove_dir_all(&dir);
+        let posts = load_all(&dir).unwrap();
+        assert!(posts.is_empty());
+    }
+
+    #[test]
+    fn test_load_all_empty_dir() {
+        let dir = std::env::temp_dir().join("web_test_empty_posts");
+        std::fs::create_dir_all(dir.join("posts")).unwrap();
+        let posts = load_all(&dir).unwrap();
+        assert!(posts.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_all_sorts_by_date_desc() {
+        let dir = std::env::temp_dir().join("web_test_sort_posts");
+        let posts_subdir = dir.join("posts");
+        std::fs::create_dir_all(&posts_subdir).unwrap();
+
+        std::fs::write(
+            posts_subdir.join("older.md"),
+            "+++\ntitle = \"Old\"\ndate = \"2023-01-01\"\n+++\nold",
+        )
+        .unwrap();
+        std::fs::write(
+            posts_subdir.join("newer.md"),
+            "+++\ntitle = \"New\"\ndate = \"2024-12-31\"\n+++\nnew",
+        )
+        .unwrap();
+        // Non-markdown file should be ignored
+        std::fs::write(posts_subdir.join("notes.txt"), "ignore me").unwrap();
+
+        let posts = load_all(&dir).unwrap();
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts[0].slug, "newer", "newest post first");
+        assert_eq!(posts[1].slug, "older");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
