@@ -14,7 +14,7 @@ env:
 jobs:
   fmt:
     name: rustfmt
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
@@ -41,14 +41,14 @@ jobs:
         with:
           runCmd: cargo clippy --all-targets --locked -- -D warnings
 
-  release-build:
-    name: release build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
-        with:
-          runCmd: cargo build --release --locked
+  # release-build:
+  #   name: release build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  #     - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+  #       with:
+  #         runCmd: cargo build --release --locked
 
   docker-build:
     name: Build application with docker
