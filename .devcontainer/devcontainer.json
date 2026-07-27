@@ -6,5 +6,6 @@
         "target": "dev"
     },
     "forwardPorts": [3000],
+    "remoteUser": "vscode",
     "postCreateCommand": "rustc --version && cargo --version && rustup target list --installed"
 }
