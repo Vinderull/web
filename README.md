@@ -87,9 +87,11 @@ docker run -p 3000:3000 blog
 # Server starts on http://localhost:3000
 ```
 
-The runtime image is `debian:trixie-slim` with just the release binary,
-content, and static assets, running as a non-root `blog` user. `CONTENT_DIR`
-and `STATIC_DIR` are baked in via the Dockerfile `ENV`.
+The runtime image is **distroless** (`gcr.io/distroless/static-debian12:nonroot`)
+— no shell, no package manager, no libc. The binary is statically linked with
+musl, so the final image is ~13MB and contains only the binary, content, and
+static assets, running as a non-root user (UID 65532). `CONTENT_DIR` and
+`STATIC_DIR` are baked in via the Dockerfile `ENV`.
 
 ## Configuration
 

@@ -2,8 +2,9 @@
     "name": "blog",
     "build": {
         "dockerfile": "Dockerfile",
+        "context": "..",
         "target": "dev"
     },
     "forwardPorts": [3000],
-    "postCreateCommand": "rustc --version && cargo --version"
+    "postCreateCommand": "rustc --version && cargo --version && rustup target list --installed"
 }
