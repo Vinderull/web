@@ -79,7 +79,7 @@ refuses to start.
 
 The runtime image is **distroless** (`gcr.io/distroless/static-debian12:nonroot`)
 — no shell, no package manager, no libc. The binary is statically linked with
-musl, so the final image is ~13MB and contains only the binary, content, and
+musl, so the final image is ~2.3MB and contains only the binary, content, and
 static assets, running as a non-root user (UID 65532). `CONTENT_DIR` and
 `STATIC_DIR` are baked in via the Dockerfile `ENV`.
 
