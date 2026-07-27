@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && rustup target add ${MUSL_TARGET}
 WORKDIR /build
 COPY . .
-RUN cargo build --release
+RUN cargo build --release --target ${MUSL_TARGET}
 
 # ---- Runtime stage (for deployment) ----
 # Distroless static: no shell, no package manager, no libc (binary is musl-static).
