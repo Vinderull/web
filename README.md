@@ -24,6 +24,7 @@ src/
   posts.rs         Post loading, frontmatter parsing, markdown rendering
   templates.rs     Askama template structs
 .devcontainer/     Multi-stage Dockerfile (dev + runtime), devcontainer config
+quadlet/           Podman Quadlet units (systemd-managed pod: blog + Caddy)
 ```
 
 ## Development
@@ -77,48 +78,41 @@ refuses to start.
 
 ## Deployment
 
-The runtime image is **distroless** (`gcr.io/distroless/static-debian12:nonroot`)
+The runtime image is **distroless** (`gcr.io/distroless/static-debian13:nonroot`)
 — no shell, no package manager, no libc. The binary is statically linked with
 musl, so the final image is ~2.3MB and contains only the binary, content, and
 static assets, running as a non-root user (UID 65532). `CONTENT_DIR` and
 `STATIC_DIR` are baked in via the Dockerfile `ENV`.
 
-### Option A: docker compose + Caddy (recommended for production)
+Deployment targets Podman — the runtime image is built with `podman build` from
+the same multi-stage Dockerfile (`runtime` stage) used in development.
 
-`docker-compose.yml` brings up two services: the blog app and a
-[Caddy](https://caddyserver.com/) reverse proxy in front of it. Caddy
-automatically provisions and renews Let's Encrypt TLS certificates, so this is
-the path to HTTPS on a real domain.
+### Option A: Podman Quadlet + Caddy (recommended for production)
 
-1. Edit `Caddyfile` and replace `blog.example.com` with your domain. The
-   domain's DNS A/AAAA records must point at the host running the compose
-   stack (Caddy completes an HTTP-01 challenge, so port 80 must be reachable
-   from the public internet).
-2. From the repo root:
+`quadlet/` contains systemd-managed Podman units that run the blog app and a
+[Caddy](https://caddyserver.com/) reverse proxy together in a single **pod**.
+Caddy automatically provisions and renews Let's Encrypt TLS certificates, so
+this is the path to HTTPS on a real domain. Quadlet does not build images, so
+build the runtime image once and rebuild on code changes:
 
 ```bash
-# Builds the distroless runtime image (runtime stage) and starts Caddy
-docker compose up -d --build
-
-# Tail logs (watch Caddy obtain the cert on first boot)
-docker compose logs -f
+# Build the distroless runtime image
+podman build -f .devcontainer/Dockerfile --target runtime -t localhost/blog:latest .
 ```
 
-3. Caddy terminates TLS on ports 80/443 and proxies to `blog:3000` over the
-   compose network. The blog service only exposes port 3000 *internally* — it
-   is not published to the host, so all external traffic goes through Caddy.
-   Caddy also adds `zstd`/`gzip` compression (see `Caddyfile`).
+Then install the units, start the pod, and edit the `Caddyfile` domain. See
+[`quadlet/README.md`](quadlet/README.md) for the full setup — rootful/rootless
+variants and the Flatcar/VPS Ignition provisioning flow. Caddy terminates TLS
+on ports 80/443 and proxies to the blog over the pod's shared localhost
+namespace; the blog is not published to the host, so all external traffic goes
+through Caddy. Caddy also adds `zstd`/`gzip` compression (see `Caddyfile`).
 
-To run locally without TLS (e.g. for testing on `localhost`), replace the site
-address in `Caddyfile` with `localhost` or `:80`; Caddy then serves plain HTTP
-instead of provisioning certs.
-
-### Option B: plain docker (no reverse proxy)
+### Option B: plain podman (no reverse proxy)
 
 ```bash
 # The Dockerfile lives in .devcontainer/ — use -f to point to it
-docker build -t blog --target runtime -f .devcontainer/Dockerfile .
-docker run -p 3000:3000 blog
+podman build -t blog --target runtime -f .devcontainer/Dockerfile .
+podman run -p 3000:3000 blog
 # Server starts on http://localhost:3000 (plain HTTP, no TLS)
 ```
 
