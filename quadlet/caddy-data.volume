@@ -1,0 +1,5 @@
+[Unit]
+Description=Caddy persistent state (certs, leases)
+# Mounted at /data in the caddy container.
+
+[Volume]

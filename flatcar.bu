@@ -1,0 +1,62 @@
+# Flatcar Container Linux Ignition config for the web pod.
+#
+# Convert to an Ignition JSON spec with Butane, then pass the result as the
+# instance user-data when provisioning a Flatcar VPS:
+#
+#   butane --pretty -d . flatcar.bu -o ignition.json
+#
+# The blog image is NOT shipped here (Quadlet does not build images). Build it
+# on a dev machine and `podman load` it on the VPS after first boot — see the
+# README "Flatcar / VPS" section.
+variant: flatcar
+version: 1.1.0
+storage:
+  files:
+    # Podman is an opt-in Flatcar system extension (sysext), not in the base
+    # image. Writing its name here makes Flatcar pull & merge flatcar-podman at
+    # first boot (requires internet). See:
+    # https://www.flatcar.org/docs/latest/provisioning/sysext/
+    - path: /etc/flatcar/enabled-sysext.conf
+      mode: 0644
+      contents:
+        inline: |
+          podman
+    # Image trust policy. The flatcar-podman sysext ships a strict
+    # /etc/containers/policy.json (default: reject). podman load of a local
+    # archive uses the docker-archive / oci-archive transport, which that
+    # default rejects ("Source image rejected by policy"). Ship our own policy
+    # that allows local archives (and keeps docker.io/library accepted so the
+    # docker.io/caddy:2 pull still works). Ignition writes /etc in the initramfs
+    # before the sysext activates, so this wins over the sysext's default.
+    - path: /etc/containers/policy.json
+      mode: 0644
+      contents:
+        local: quadlet/policy.json
+    - path: /etc/web/Caddyfile
+      mode: 0644
+      contents:
+        local: Caddyfile
+    - path: /etc/containers/systemd/web.pod
+      mode: 0644
+      contents:
+        local: quadlet/web.pod
+    - path: /etc/containers/systemd/blog.container
+      mode: 0644
+      contents:
+        local: quadlet/blog.container
+    - path: /etc/containers/systemd/caddy.container
+      mode: 0644
+      contents:
+        local: quadlet/caddy.container
+    - path: /etc/containers/systemd/caddy-data.volume
+      mode: 0644
+      contents:
+        local: quadlet/caddy-data.volume
+    - path: /etc/containers/systemd/caddy-config.volume
+      mode: 0644
+      contents:
+        local: quadlet/caddy-config.volume
+systemd:
+  units:
+    - name: web-pod.service
+      enabled: true

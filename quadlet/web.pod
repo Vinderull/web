@@ -1,0 +1,16 @@
+[Unit]
+Description=Web app pod (blog + caddy)
+# Co-locates the blog app and Caddy reverse proxy in one network namespace.
+# Containers reach each other on 127.0.0.1; ports are published by the pod.
+
+[Pod]
+PublishPort=80:80
+PublishPort=443:443
+# ponytail: pod infra container adds ~5MB overhead vs. separate containers on a network.
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

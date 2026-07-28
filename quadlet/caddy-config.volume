@@ -1,0 +1,5 @@
+[Unit]
+Description=Caddy runtime config / autosave
+# Mounted at /config in the caddy container.
+
+[Volume]
