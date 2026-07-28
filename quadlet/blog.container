@@ -1,0 +1,22 @@
+[Unit]
+Description=Blog
+# Pod= auto-generates Requires=/After= on web-pod.service.
+Before=caddy-container.service
+
+[Container]
+Image=localhost/blog:latest
+ContainerName=blog
+Pod=web.pod
+# Reachable inside the pod at 127.0.0.1:3000; no host publish needed.
+User=65532:65532
+ReadOnly=true
+DropCapability=all
+
+[Service]
+# Compose `restart: unless-stopped` ≈ systemd Restart=always
+# (a deliberate `systemctl stop` is still respected).
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

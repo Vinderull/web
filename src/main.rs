@@ -64,6 +64,7 @@ fn main() -> anyhow::Result<()> {
         let app = Router::new()
             .route("/", get(index))
             .route("/posts/{slug}", get(post))
+            .route("/healthz", get(|| async { "ok" }))
             .nest_service("/static", ServeDir::new(&config.static_dir))
             .layer(TraceLayer::new_for_http())
             .with_state(state);

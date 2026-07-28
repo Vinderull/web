@@ -2,5 +2,8 @@
 # Caddy automatically provisions and renews Let's Encrypt TLS certs.
 blog.example.com {
 	encode zstd gzip
-	reverse_proxy blog:3000
+	reverse_proxy 127.0.0.1:3000 {
+		health_path /healthz
+		health_interval 5s
+	}
 }
