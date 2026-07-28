@@ -10,6 +10,10 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0  # Faster from-scratch builds in CI
 
+permissions:
+  contents: read
+  packages: write
+
 
 jobs:
   fmt:
@@ -64,3 +68,31 @@ jobs:
             --certificate-identity keyless@distroless.iam.gserviceaccount.com
       - name: Build application image
         run: docker build -t blog --target runtime -f .devcontainer/Dockerfile .
+
+  deploy:
+    name: Push runtime image to ghcr
+    runs-on: ubuntu-latest
+    needs: [fmt, test, clippy, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Log in to GHCR
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push runtime image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/web:latest
+            ghcr.io/${{ github.repository_owner }}/web:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
