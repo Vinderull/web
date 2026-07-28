@@ -1,0 +1,9 @@
+web
+Copyright (c) 2025 Ryan Dufour
+
+Licensed under the MIT License (see LICENSE).
+
+This project includes third-party assets:
+
+  htmx 2.0.4 — https://htmx.org/
+  Licensed under the BSD Zero Clause License (0BSD).
