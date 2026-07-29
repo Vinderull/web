@@ -129,9 +129,10 @@ Startup order is deliberate (each step justifies the next):
   `Restart=always`. Caddy self-gates routing on `/healthz`.
 - **CI** (`.github/workflows/ci.yml`) — fmt/test/clippy via devcontainers,
   a `docker-build` job that cosign-verifies the distroless base image, and a
-  `deploy` job (main-only, post-build) that builds+pushes the `runtime` image
-  to `ghcr.io/<owner>/web:latest` and `:sha` with `org.opencontainers.image.*`
-  labels.
+  release-triggered `deploy` job (fires on GitHub Release publish against a
+  `v*` tag) that builds+pushes the `runtime` image to
+  `ghcr.io/<owner>/web:latest` and `:<tag>`, then keyless-signs it with
+  cosign. `policy.json` enforces the signature on pull.
 - **Flatcar** (`flatcar.bu`) — Ignition provisioning: writes the quadlet units,
   `Caddyfile` and `auth.json` (GHCR creds) to `/etc`, enables the
   `flatcar-podman` sysext. The blog image is pulled from GHCR by the quadlet
