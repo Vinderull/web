@@ -118,16 +118,14 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
-          # --new-bundle-format=false: cosign v3 defaults to a protobuf
-          # bundle format that containers/image (podman) cannot read via
-          # use-sigstore-attachments. Force the legacy bundle format that
-          # podman's sigstoreSigned policy verifies.
-          # --use-signing-config=false: cosign v3 mandates this for offline
-          # key-based signers; without it, --new-bundle-format=false is
-          # rejected ("must provide --new-bundle-format or --bundle ... with
-          # --signing-config or --use-signing-config").
+          # Three orthogonal flags make cosign v3 emit what containers/image
+          # (podman) can verify via use-sigstore-attachments:
+          #  --new-bundle-format=false      legacy signature CONTENT (not protobuf)
+          #  --registry-referrers-mode=legacy  tag-based .sig STORAGE (not OCI referrers)
+          #  --use-signing-config=false     required for offline key-based signing in v3
           cosign sign --yes --recursive \
             --new-bundle-format=false --use-signing-config=false \
+            --registry-referrers-mode=legacy \
             --key env://COSIGN_PRIVATE_KEY \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
       - name: Attest SLSA provenance (key-based)
