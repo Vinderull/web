@@ -122,7 +122,12 @@ jobs:
           # bundle format that containers/image (podman) cannot read via
           # use-sigstore-attachments. Force the legacy bundle format that
           # podman's sigstoreSigned policy verifies.
-          cosign sign --yes --recursive --new-bundle-format=false \
+          # --use-signing-config=false: cosign v3 mandates this for offline
+          # key-based signers; without it, --new-bundle-format=false is
+          # rejected ("must provide --new-bundle-format or --bundle ... with
+          # --signing-config or --use-signing-config").
+          cosign sign --yes --recursive \
+            --new-bundle-format=false --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
       - name: Attest SLSA provenance (key-based)
@@ -159,7 +164,8 @@ jobs:
             }
           }
           EOF
-          cosign attest --yes --new-bundle-format=false \
+          cosign attest --yes \
+            --new-bundle-format=false --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY \
             --predicate provenance.json --type slsaprovenance1 \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
