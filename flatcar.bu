@@ -5,9 +5,9 @@
 #
 #   butane --pretty -d . flatcar.bu -o ignition.json
 #
-# The blog image is NOT shipped here (Quadlet does not build images). Build it
-# on a dev machine and `podman load` it on the VPS after first boot — see the
-# README "Flatcar / VPS" section.
+# The blog image is NOT shipped here (Quadlet does not build images). CI builds
+# and pushes it to ghcr.io/vinderull/web; the blog.container unit pulls it
+# (Update=registry) on first boot — see the README "Flatcar / VPS" section.
 variant: flatcar
 version: 1.1.0
 storage:
@@ -22,11 +22,11 @@ storage:
         inline: |
           podman
     # Image trust policy. The flatcar-podman sysext ships a strict
-    # /etc/containers/policy.json (default: reject). podman load of a local
-    # archive uses the docker-archive / oci-archive transport, which that
-    # default rejects ("Source image rejected by policy"). Ship our own policy
-    # that allows local archives (and keeps docker.io/library accepted so the
-    # docker.io/caddy:2 pull still works). Ignition writes /etc in the initramfs
+    # /etc/containers/policy.json (default: reject). Ship our own policy that
+    # allowlists only the two registries the pod actually pulls from:
+    # ghcr.io/vinderull (the blog image) and docker.io/library (caddy:2).
+    # Everything else — including local docker-archive / oci-archive loads —
+    # stays rejected by the default. Ignition writes /etc in the initramfs
     # before the sysext activates, so this wins over the sysext's default.
     - path: /etc/containers/policy.json
       mode: 0644
@@ -56,6 +56,11 @@ storage:
       mode: 0644
       contents:
         local: quadlet/caddy-config.volume
+    - path: /etc/containers/auth.json
+      mode: 0600
+      contents:
+        local: quadlet/auth.json
+
 systemd:
   units:
     - name: web-pod.service

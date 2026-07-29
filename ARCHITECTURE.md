@@ -133,9 +133,9 @@ Startup order is deliberate (each step justifies the next):
   to `ghcr.io/<owner>/web:latest` and `:sha` with `org.opencontainers.image.*`
   labels.
 - **Flatcar** (`flatcar.bu`) — Ignition provisioning: writes the quadlet units,
-  `Caddyfile`, and a permissive `policy.json` to `/etc`, enables the
-  `flatcar-podman` sysext. Image is built on a dev box (`podman build`),
-  shipped as an OCI archive (`podman save`/`load`).
+  `Caddyfile` and `auth.json` (GHCR creds) to `/etc`, enables the
+  `flatcar-podman` sysext. The blog image is pulled from GHCR by the quadlet
+  (`Update=registry`); no on-box build/load step.
 
 ## Request lifecycle (`GET /posts/my-post`)
 Tracing span opens → router matches `/posts/{slug}` → axum injects cloned
