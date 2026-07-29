@@ -8,7 +8,7 @@
         {
           "type": "sigstoreSigned",
           "keyPath": "/etc/containers/cosign.pub",
-          "signedIdentity": { "type": "matchRepoDigestOrExact" }
+          "signedIdentity": { "type": "matchRepository" }
         }
       ],
       "docker.io/library": [{ "type": "insecureAcceptAnything" }]
