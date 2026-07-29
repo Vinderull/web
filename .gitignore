@@ -23,3 +23,4 @@ target
 # Generated Ignition config (from flatcar.bu via Butane)
 ignition.json
 blog.tar
+.github/workflows/*.swp

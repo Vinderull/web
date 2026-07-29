@@ -155,7 +155,7 @@ jobs:
             }
           }
           EOF
-          cosign attest --yes --registry-referrers-mode=legacy \
+          cosign attest --yes \
             --key env://COSIGN_PRIVATE_KEY \
             --predicate provenance.json --type slsaprovenance1 \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
