@@ -14,14 +14,22 @@ grouping the blog app and Caddy reverse proxy in a single **pod**.
 The `web.network` unit from the non-pod variant is gone — a pod provides its
 own internal network, and the two containers reach each other on `127.0.0.1`.
 
-## 1. Build the blog image
-Quadlet does not build images at unit-load time; build once (rebuild on code change):
+## 1. Image source
+`blog.container` references `ghcr.io/vinderull/web:latest` with `Update=registry`,
+so Podman pulls the image from GHCR each time the service starts — no local build
+step is needed for deployment. CI (`.github/workflows/ci.yml`) builds the
+`runtime` image and pushes `ghcr.io/<owner>/web:latest` (plus `:<sha>`) on every
+push to `main`.
+
+For a private GHCR package, authenticate Podman first (`podman login ghcr.io`).
+On Flatcar this is handled for you via `quadlet/auth.json` → `/etc/containers/auth.json`
+(see the Flatcar section); on a general host, run `podman login ghcr.io` once.
+
+To build locally for testing and feed it to the quadlet, build the `runtime`
+target tagged to match `Image=`:
 
 ```sh
-podman build \
-  -f .devcontainer/Dockerfile \
-  --target runtime \
-  -t localhost/blog:latest .
+podman build -f .devcontainer/Dockerfile --target runtime -t ghcr.io/vinderull/web:latest .
 ```
 
 ## 2. Install the units
@@ -65,8 +73,10 @@ sudo systemctl restart caddy-container
 ```
 
 ## Notes / deviations from compose
-- **Image build**: compose `build:` is replaced by an explicit `podman build` step
-  (step 1). Re-run it after code changes, then `systemctl restart blog-container`.
+- **Image source**: compose `build:` is replaced by a registry pull. CI pushes the
+  `runtime` image to `ghcr.io/<owner>/web:latest` on merge to `main`;
+  `blog.container` pulls it via `Update=registry`, so a deploy is just
+  `systemctl restart blog-container`.
 - **`expose:`**: omitted — it's informational in compose; reachability comes from
   the shared pod localhost namespace.
 - **`depends_on`**: modeled with `Requires=`/`After=`/`Before=` ordering. Caddy
@@ -103,14 +113,18 @@ Edit `Caddyfile` and replace `blog.example.com` with your domain. The domain's
 DNS A/AAAA records must point at the VPS (Caddy completes an HTTP-01 challenge,
 so port 80 must be reachable from the public internet).
 
-### 2. Build the blog image (Quadlet does not build images)
-Flatcar ships no git/rustc toolchain, so build the distroless runtime image on a
-dev machine and ship the OCI archive:
+### 2. Image is pulled from GHCR (no on-box build)
+Flatcar ships no git/rustc toolchain, and it no longer needs one: CI builds the
+`runtime` image and pushes it to `ghcr.io/vinderull/web:latest` on every merge to
+`main` (see `.github/workflows/ci.yml`). `blog.container` references that image with
+`Update=registry`, so Podman pulls it from GHCR when the service starts — no
+`podman build`/`save`/`load`/`scp` round-trip is needed.
 
-```sh
-podman build -f .devcontainer/Dockerfile --target runtime -t localhost/blog:latest .
-podman save -o blog.tar localhost/blog:latest
-```
+Authentication to GHCR is handled by `quadlet/auth.json`, which the Ignition config
+writes to `/etc/containers/auth.json` (see `flatcar.bu`). The `podman` sysext picks
+it up automatically, so `Update=registry` pulls succeed out of the box. (For a
+public GHCR package this file is unnecessary; keep it only while the package is
+private, and never commit a real token to it.)
 
 ### 3. Render the Ignition config
 `flatcar.bu` (repo root) references the Caddyfile and quadlet units as local
@@ -127,7 +141,8 @@ Most providers (Hetzner, DigitalOcean, Equinix, Vultr) accept `ignition.json` as
 the user-data / custom Ignition field when booting a Flatcar stable image.
 On first boot Ignition writes `/etc/web/Caddyfile` and the six quadlet units
 under `/etc/containers/systemd/`, enables `web-pod.service`, writes `podman` to
-`/etc/flatcar/enabled-sysext.conf`, and writes `/etc/containers/policy.json`.
+`/etc/flatcar/enabled-sysext.conf`, and writes `/etc/containers/auth.json`
+(GHCR credentials for the `Update=registry` pull).
 
 Podman is **not** in the Flatcar base image; it is an opt-in system extension
 (sysext, available since 3941.0.0). The `enabled-sysext.conf` entry makes Flatcar
@@ -135,42 +150,40 @@ download and merge `flatcar-podman` at boot (requires internet on the VPS at
 first boot). The extension ships a podman new enough to include the Quadlet
 generator. See https://www.flatcar.org/docs/latest/provisioning/sysext/
 
-### 4. Load the blog image and start
-The loaded image and the quadlet units live under `/etc` and `/var`, which
-survive Flatcar auto-update reboots.
+### 4. Start the pod (image pulls from GHCR)
+The quadlet units live under `/etc/containers/systemd/`, which survives Flatcar
+auto-update reboots. The blog image is pulled from GHCR on first start
+(`Update=registry`); the image cache lives in `/var` and also persists.
 
 ```sh
-scp blog.tar user@vps:/var/lib/web/blog.tar
 ssh user@vps
-sudo podman load -i /var/lib/web/blog.tar
 sudo systemctl daemon-reload        # runs the quadlet generator
-sudo systemctl start web-pod        # pulls in blog-container + caddy-container
+sudo systemctl start web-pod        # pulls in blog-container + caddy-container;
+                                    # blog-container pulls ghcr.io/vinderull/web:latest
 sudo systemctl status web-pod
+journalctl -u blog-container -f     # watch the image pull + app boot
 journalctl -u caddy-container -f    # watch Caddy obtain the Let's Encrypt cert
 ```
 
-> `podman load` failing with `payload does not match any of the supported image
-> formats` almost always means the local archive was **rejected by policy** —
-> Flatcar's podman sysext ships a strict `/etc/containers/policy.json`
-> (`default: reject`) that blocks the `docker-archive`/`oci-archive`
-> transports. The `flatcar.bu` config writes our own `policy.json`
-> (`quadlet/policy.json` → `/etc/containers/policy.json`) that permits those
-> transports (plus `docker.io/library` for the Caddy pull) before the sysext
-> activates, so `podman load` works out of the box. If you skip the Ignition
-> policy, the on-box workaround is `sudo podman load
-> --signature-policy=/etc/containers/policy.json` after editing it to allow
-> `docker-archive`, or build the image on the VPS instead of loading an archive.
+> If the pull fails with `image not known` / `denied`, confirm
+> `/etc/containers/auth.json` has valid GHCR credentials (or that the GHCR
+> package is public). It is written by `flatcar.bu` from `quadlet/auth.json`;
+> re-render/re-apply the Ignition config if it's stale.
 
 ### Updating the blog
+CI rebuilds and pushes `ghcr.io/vinderull/web:latest` on every merge to `main`, so
+a production update is a one-liner — `Update=registry` re-pulls the `:latest` tag
+on restart:
+
 ```sh
-# dev machine
-podman build -f .devcontainer/Dockerfile --target runtime -t localhost/blog:latest .
-podman save -o blog.tar localhost/blog:latest
-scp blog.tar user@vps:/var/lib/web/blog.tar
 # vps
-sudo podman load -i /var/lib/web/blog.tar
-sudo systemctl restart blog-container
+sudo systemctl restart blog-container   # re-pulls ghcr.io/vinderull/web:latest
 ```
+
+To pin a specific build instead of floating on `:latest`, set the tag in
+`blog.container` (e.g. `Image=ghcr.io/vinderull/web:<sha>` — the SHA is published
+by the CI `deploy` job alongside `:latest`), copy the unit to
+`/etc/containers/systemd/`, `daemon-reload`, then `restart`.
 
 ### Notes
 - **Rootful**: this config runs rootful (units in `/etc/containers/systemd/`),
@@ -179,8 +192,8 @@ sudo systemctl restart blog-container
   `net.ipv4.ip_unprivileged_port_start=80`, and enable lingering.
 - **Persistence**: `/etc` and `/var` persist across Flatcar auto-update reboots,
   so the units, Caddyfile, named volumes (`caddy-data` / `caddy-config` → TLS
-  certs and ACME leases), and the loaded `localhost/blog:latest` image all
-  survive. The pod auto-starts (`Restart=always` + enabled unit).
+  certs and ACME leases), and the pulled `ghcr.io/vinderull/web:latest` image
+  cache all survive. The pod auto-starts (`Restart=always` + enabled unit).
 - **Podman sysext**: podman is opt-in on Flatcar (not in the base image).
   `flatcar.bu` writes `podman` to `/etc/flatcar/enabled-sysext.conf`, so Flatcar
   pulls and merges `flatcar-podman` at first boot. The extension is versioned

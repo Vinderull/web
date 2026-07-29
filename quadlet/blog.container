@@ -4,13 +4,23 @@ Description=Blog
 Before=caddy-container.service
 
 [Container]
-Image=localhost/blog:latest
+Image=ghcr.io/vinderull/web:latest
 ContainerName=blog
 Pod=web.pod
+AutoUpdate=registry
+Pull=newer
+# /etc/containers/auth.json (GHCR creds) is written by the Flatcar Ignition
+# config. The label drives `podman-auto-update` pulls; --authfile drives the
+# initial `podman run` pull.
+Label=io.containers.autoupdate.authfile=/etc/containers/auth.json
+PodmanArgs=--authfile=/etc/containers/auth.json
 # Reachable inside the pod at 127.0.0.1:3000; no host publish needed.
 User=65532:65532
 ReadOnly=true
 DropCapability=all
+NoNewPrivileges=true
+# ponytail: static binary never forks/climbs; loosen on a multi-app host.
+PodmanArgs=--memory=512m --cpus=1 --pids-limit=100 --ulimit nofile=1024:1024
 
 [Service]
 # Compose `restart: unless-stopped` ≈ systemd Restart=always
