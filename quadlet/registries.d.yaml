@@ -1,0 +1,6 @@
+# Tell containers/image where to find cosign sigstore attachments.
+# use-sigstore-attachments is false by default, which is why podman pull
+# rejects a cosign-signed image ("no signature exists") even though
+# `cosign verify` succeeds — cosign knows where to look, podman doesn't.
+default-docker:
+  use-sigstore-attachments: true

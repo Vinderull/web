@@ -111,7 +111,7 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
-          cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
+          cosign sign --yes --recursive --key env://COSIGN_PRIVATE_KEY \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
       - name: Attest SLSA provenance (key-based)
         env:

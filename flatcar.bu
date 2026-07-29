@@ -68,8 +68,29 @@ storage:
       mode: 0644
       contents:
         local: quadlet/cosign.pub
+    # Enable cosign sigstore attachment lookups so policy.json's
+    # sigstoreSigned rule can actually find the signatures cosign attaches
+    # to the image. Without this, use-sigstore-attachments defaults to false
+    # and podman pull rejects signed images ("no signature exists").
+    - path: /etc/containers/registries.d/default.yaml
+      mode: 0644
+      contents:
+        local: quadlet/registries.d.yaml
+    # Hardened sshd_config (public-key-only, no root login, hardened
+    # ciphers/MACs/KEX). Ignition writes this before sshd starts on first boot.
+    - path: /etc/ssh/sshd_config
+      mode: 0644
+      overwrite: true
+      contents:
+        local: sshd_config
 
 systemd:
   units:
     - name: web-pod.service
       enabled: true
+
+passwd:
+  users:
+    - name: core
+      ssh_authorized_keys:
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHzOTEaaLIk/vVAEGpfGZX1iuKGXiDhflxQsdBpKzyWC [EMAIL]
