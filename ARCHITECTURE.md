@@ -132,7 +132,8 @@ Startup order is deliberate (each step justifies the next):
   release-triggered `deploy` job (fires on GitHub Release publish against a
   `v*` tag) that builds+pushes the `runtime` image to
   `ghcr.io/<owner>/web:latest` and `:<tag>`, then keyless-signs it with
-  cosign. `policy.json` enforces the signature on pull.
+  cosign and attaches a SLSA provenance attestation. `policy.json` enforces
+  the signature on pull.
 - **Flatcar** (`flatcar.bu`) — Ignition provisioning: writes the quadlet units,
   `Caddyfile` and `auth.json` (GHCR creds) to `/etc`, enables the
   `flatcar-podman` sysext. The blog image is pulled from GHCR by the quadlet

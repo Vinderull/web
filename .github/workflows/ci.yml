@@ -111,3 +111,35 @@ jobs:
         run: |
           cosign sign --yes \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
+      - name: Attest SLSA provenance (keyless via GitHub OIDC)
+        run: |
+          cat > provenance.json <<EOF
+          {
+            "buildDefinition": {
+              "buildType": "https://github.com/actions/runner/github-hosted",
+              "externalParameters": {
+                "repository": "${{ github.repository }}",
+                "ref": "${{ github.ref }}",
+                "tag": "${{ github.ref_name }}",
+                "commit": "${{ github.sha }}",
+                "workflow": "${{ github.workflow }}",
+                "event": "${{ github.event_name }}"
+              },
+              "resolvedDependencies": [
+                {
+                  "uri": "git+https://github.com/${{ github.repository }}",
+                  "digest": { "sha1": "${{ github.sha }}" }
+                }
+              ]
+            },
+            "runDetails": {
+              "builder": { "id": "https://github.com/actions/runner/github-hosted" },
+              "metadata": {
+                "invocationId": "${{ github.run_id }}-${{ github.run_attempt }}",
+                "startedOn": "$GITHUB_RUN_STARTED_AT"
+              }
+            }
+          }
+          EOF
+          cosign attest --yes --predicate provenance.json --type slsaprovenance1 \
+            ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
