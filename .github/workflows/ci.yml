@@ -111,7 +111,12 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
-          cosign sign --yes --recursive --key env://COSIGN_PRIVATE_KEY \
+          # --new-bundle-format=false: cosign v3 defaults to the protobuf
+          # bundle format (OCI 1.1 referrers API), which containers/image
+          # (podman) cannot find via use-sigstore-attachments. Force the
+          # legacy .sig tag format that podman's sigstoreSigned policy reads.
+          cosign sign --yes --recursive --new-bundle-format=false \
+            --key env://COSIGN_PRIVATE_KEY \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
       - name: Attest SLSA provenance (key-based)
         env:
@@ -147,6 +152,7 @@ jobs:
             }
           }
           EOF
-          cosign attest --yes --key env://COSIGN_PRIVATE_KEY \
+          cosign attest --yes --new-bundle-format=false \
+            --key env://COSIGN_PRIVATE_KEY \
             --predicate provenance.json --type slsaprovenance1 \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
