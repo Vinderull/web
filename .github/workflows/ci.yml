@@ -66,6 +66,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.6.4'
       - name: Verify distroless base image
         run: |
           cosign verify gcr.io/distroless/static-debian13:nonroot \
@@ -109,16 +111,18 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.6.4'
       - name: Sign image (key-based)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
-          # --registry-referrers-mode=legacy: cosign v3 defaults to OCI 1.1
-          # referrers API storage, which containers/image (podman) cannot
-          # find via use-sigstore-attachments. Force the legacy .sig tag
-          # format that podman's sigstoreSigned policy reads.
-          cosign sign --yes --recursive --registry-referrers-mode=legacy \
+          # cosign v2.6.4 uses the legacy .sig tag-based bundle format
+          # that containers/image (podman) can verify via
+          # use-sigstore-attachments. cosign v3 defaults to a new
+          # protobuf bundle format that containers/image cannot read.
+          cosign sign --yes --recursive \
             --key env://COSIGN_PRIVATE_KEY \
             ghcr.io/${{ env.OWNER_LC }}/web@${{ steps.build.outputs.digest }}
       - name: Attest SLSA provenance (key-based)
