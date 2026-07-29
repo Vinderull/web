@@ -18,8 +18,10 @@ own internal network, and the two containers reach each other on `127.0.0.1`.
 `blog.container` references `ghcr.io/vinderull/web:latest` with `Update=registry`,
 so Podman pulls the image from GHCR each time the service starts — no local build
 step is needed for deployment. CI (`.github/workflows/ci.yml`) builds the
-`runtime` image and pushes `ghcr.io/<owner>/web:latest` (plus `:<sha>`) on every
-push to `main`.
+`runtime` image and pushes `ghcr.io/<owner>/web:latest` (plus `:<tag>`) whenever
+you publish a GitHub Release (against a `v*` tag). The image is keyless-signed
+with cosign; `policy.json` rejects any pull whose signature doesn't match the
+`ci.yml@refs/tags/v*` OIDC identity.
 
 For a private GHCR package, authenticate Podman first (`podman login ghcr.io`).
 On Flatcar this is handled for you via `quadlet/auth.json` → `/etc/containers/auth.json`
@@ -74,8 +76,10 @@ sudo systemctl restart caddy-container
 
 ## Notes / deviations from compose
 - **Image source**: compose `build:` is replaced by a registry pull. CI pushes the
-  `runtime` image to `ghcr.io/<owner>/web:latest` on merge to `main`;
-  `blog.container` pulls it via `Update=registry`, so a deploy is just
+  `runtime` image to `ghcr.io/<owner>/web:latest` (plus a versioned `:<tag>`,
+  keyless-signed with cosign) when you publish a GitHub Release (against a `v*`
+  tag); `blog.container`
+  pulls it via `Update=registry`, so a deploy is just
   `systemctl restart blog-container`.
 - **`expose:`**: omitted — it's informational in compose; reachability comes from
   the shared pod localhost namespace.
@@ -115,10 +119,11 @@ so port 80 must be reachable from the public internet).
 
 ### 2. Image is pulled from GHCR (no on-box build)
 Flatcar ships no git/rustc toolchain, and it no longer needs one: CI builds the
-`runtime` image and pushes it to `ghcr.io/vinderull/web:latest` on every merge to
-`main` (see `.github/workflows/ci.yml`). `blog.container` references that image with
-`Update=registry`, so Podman pulls it from GHCR when the service starts — no
-`podman build`/`save`/`load`/`scp` round-trip is needed.
+`runtime` image and pushes it to `ghcr.io/vinderull/web:latest` when you
+publish a GitHub Release against a `v*` tag (see
+`.github/workflows/ci.yml`). `blog.container` references that
+image with `Update=registry`, so Podman pulls it from GHCR when the service
+starts — no `podman build`/`save`/`load`/`scp` round-trip is needed.
 
 Authentication to GHCR is handled by `quadlet/auth.json`, which the Ignition config
 writes to `/etc/containers/auth.json` (see `flatcar.bu`). The `podman` sysext picks
@@ -171,18 +176,21 @@ journalctl -u caddy-container -f    # watch Caddy obtain the Let's Encrypt cert
 > re-render/re-apply the Ignition config if it's stale.
 
 ### Updating the blog
-CI rebuilds and pushes `ghcr.io/vinderull/web:latest` on every merge to `main`, so
-a production update is a one-liner — `Update=registry` re-pulls the `:latest` tag
-on restart:
+Publishing a GitHub Release (against a `v*` tag) triggers CI to build, push
+(`ghcr.io/vinderull/web:latest` plus a versioned `:<tag>`), and keyless-sign
+the image. A production update is then a one-liner — `Update=registry`
+re-pulls the `:latest` tag on restart:
 
 ```sh
-# vps
+# dev machine — publish a release (creates/pushes the tag + fires CI)
+gh release create v1.2.3 --generate-notes
+# vps (once CI's deploy job is green)
 sudo systemctl restart blog-container   # re-pulls ghcr.io/vinderull/web:latest
 ```
 
-To pin a specific build instead of floating on `:latest`, set the tag in
-`blog.container` (e.g. `Image=ghcr.io/vinderull/web:<sha>` — the SHA is published
-by the CI `deploy` job alongside `:latest`), copy the unit to
+To pin a specific release instead of floating on `:latest`, set the tag in
+`blog.container` (e.g. `Image=ghcr.io/vinderull/web:v1.2.3` — version tags are
+published by the CI `deploy` job alongside `:latest`), copy the unit to
 `/etc/containers/systemd/`, `daemon-reload`, then `restart`.
 
 ### Notes
