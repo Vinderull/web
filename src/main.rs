@@ -3,6 +3,7 @@ mod posts;
 mod sandbox;
 mod templates;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -22,6 +23,9 @@ use templates::{IndexTemplate, PostTemplate};
 #[derive(Clone)]
 struct AppState {
     posts: Arc<Vec<posts::Post>>,
+    // ponytail: flat HashMap index; fine while posts fit in RAM. A DB would
+    // replace both Vec + index at corpus scale.
+    post_index: Arc<HashMap<String, usize>>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -39,6 +43,13 @@ fn main() -> anyhow::Result<()> {
     // Load posts from disk before sandboxing
     let loaded_posts = posts::load_all(&config.content_dir)?;
     tracing::info!("Loaded {} posts", loaded_posts.len());
+
+    let post_index: HashMap<String, usize> = loaded_posts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.slug.clone(), i))
+        .collect();
+    let post_index = Arc::new(post_index);
 
     // Bind listener before applying landlock (landlock would block bind on V4+)
     let listener = std::net::TcpListener::bind(&config.bind_addr)?;
@@ -59,6 +70,7 @@ fn main() -> anyhow::Result<()> {
 
         let state = AppState {
             posts: Arc::new(loaded_posts),
+            post_index,
         };
 
         let app = Router::new()
@@ -111,11 +123,12 @@ async fn post(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Html<String>, StatusCode> {
-    let p = state
-        .posts
-        .iter()
-        .find(|p| p.slug == slug)
+    let i = state
+        .post_index
+        .get(&slug)
+        .copied()
         .ok_or(StatusCode::NOT_FOUND)?;
+    let p = &state.posts[i];
     let template = PostTemplate { post: p };
     let html = template
         .render()
