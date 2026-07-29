@@ -7,12 +7,8 @@
       "ghcr.io/vinderull": [
         {
           "type": "sigstoreSigned",
-          "fulcio": "https://fulcio.sigstore.dev",
-          "rekorURL": "https://rekor.sigstore.dev",
-          "fulcioIdentity": {
-            "issuer": "https://token.actions.githubusercontent.com",
-            "subjectRegExp": "^https://github.com/vinderull/web/.github/workflows/ci.yml@refs/tags/v[0-9]+(\\.[0-9]+)*$"
-          }
+          "keyPath": "/etc/containers/cosign.pub",
+          "signedIdentity": { "type": "matchRepoDigestOrExact" }
         }
       ],
       "docker.io/library": [{ "type": "insecureAcceptAnything" }]
