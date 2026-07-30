@@ -72,6 +72,15 @@ fn main() -> anyhow::Result<()> {
     }
     let post_pages = Arc::new(post_pages);
 
+    // Drop the raw post data now that pre-rendering is done. Each Post's html
+    // body is already baked into the corresponding post_pages entry, and no
+    // route reads the raw title/date/description fields. Keeping the Vec
+    // alive (which it would, since block_on holds this frame until shutdown)
+    // roughly doubles HTML memory for no benefit.
+    // If a future route needs raw Post fields (e.g. a JSON API exposing
+    // title/date/description), retain the Vec (or a slimmed struct) here.
+    std::mem::drop(loaded_posts);
+
     // Bind listener before applying landlock (landlock would block bind on V4+)
     let listener = std::net::TcpListener::bind(&config.bind_addr)?;
     listener.set_nonblocking(true)?;
@@ -241,9 +250,7 @@ mod tests {
 
     // The post route is now a pure lookup against pre-rendered pages; this
     // mirrors the boot pipeline and guards against regressions there.
-    fn build_post_pages(
-        posts: &[posts::Post],
-    ) -> HashMap<String, (Bytes, HeaderValue)> {
+    fn build_post_pages(posts: &[posts::Post]) -> HashMap<String, (Bytes, HeaderValue)> {
         let mut map = HashMap::new();
         for p in posts {
             let html = PostTemplate { post: p }.render().unwrap();
@@ -261,9 +268,9 @@ mod tests {
         }
         let pages = build_post_pages(&posts);
         for p in &posts {
-            let (html, etag) = pages.get(&p.slug).unwrap_or_else(|| {
-                panic!("missing pre-rendered page for slug {}", p.slug)
-            });
+            let (html, etag) = pages
+                .get(&p.slug)
+                .unwrap_or_else(|| panic!("missing pre-rendered page for slug {}", p.slug));
             assert!(!html.is_empty(), "empty body for {}", p.slug);
             // ETag is a quoted opaque token.
             let etag = etag.to_str().unwrap();
