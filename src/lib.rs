@@ -114,7 +114,7 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
     let mut resp = Response::new(Body::from(body));
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=300"),
+        HeaderValue::from_static("public, max-age=60, s-maxage=600"),
     );
     resp.headers_mut().insert(header::ETAG, etag);
     resp
@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(resp.headers().get(header::ETAG).unwrap(), "\"abc\"");
         assert_eq!(
             resp.headers().get(header::CACHE_CONTROL).unwrap(),
-            "public, max-age=300"
+            "public, max-age=60, s-maxage=600"
         );
     }
 

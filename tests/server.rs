@@ -40,7 +40,7 @@ async fn index_returns_200_with_cache_headers() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
-        "public, max-age=300"
+        "public, max-age=60, s-maxage=600"
     );
     assert!(headers.contains_key(header::ETAG));
     let body = String::from_utf8(body).unwrap();
