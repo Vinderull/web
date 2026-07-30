@@ -97,7 +97,7 @@ build the runtime image once and rebuild on code changes:
 
 ```bash
 # Build the distroless runtime image
-podman build -f .devcontainer/Dockerfile --target runtime -t localhost/blog:latest .
+podman build -t localhost/blog:latest --target runtime -f .devcontainer/Dockerfile .
 ```
 
 Then install the units, start the pod, and edit the `Caddyfile` domain. See
@@ -111,9 +111,15 @@ through Caddy. Caddy also adds `zstd`/`gzip` compression (see `Caddyfile`).
 
 ```bash
 # The Dockerfile lives in .devcontainer/ — use -f to point to it
-podman build -t blog --target runtime -f .devcontainer/Dockerfile .
-podman run -p 3000:3000 blog
-# Server starts on http://localhost:3000 (plain HTTP, no TLS)
+podman build -t localhost/blog:latest --target runtime -f .devcontainer/Dockerfile .
+
+# Publish to the host on all interfaces (0.0.0.0); LAN-visible in rootful mode.
+podman run --rm -p 3000:3000 localhost/blog:latest
+
+# Loopback-only: not exposed to the network. Prefer this for local dev.
+podman run --rm -p 127.0.0.1:3000:3000 localhost/blog:latest
+
+# Server starts on http://127.0.0.1:3000 (plain HTTP, no TLS)
 ```
 
 ## Configuration
