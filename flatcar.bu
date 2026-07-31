@@ -83,11 +83,30 @@ storage:
       overwrite: true
       contents:
         local: sshd_config
+    # drop in to disable USB since we aren't ever going to use it
+    - path: /etc/modprobe.d/blacklist.conf
+      mode: 0644
+      contents:
+        inline: |
+          blacklist usb-storage
+    # disabe core user sudo access
+    - path: /etc/sudoers.d/core-passwd
+      mode: 0644
+      contents:
+        inline: |
+          core	ALL=(ALL) 	ALL
 
 systemd:
   units:
     - name: web-pod.service
       enabled: true
+    # Restrict docker to just root
+    - name: docker.socket
+      dropins:
+        - name: 10-restrict.conf
+          contents: |
+            [Socket]
+            SocketGroup=root
 
 passwd:
   users:
