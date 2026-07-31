@@ -85,13 +85,13 @@ storage:
         local: sshd_config
     # drop in to disable USB since we aren't ever going to use it
     - path: /etc/modprobe.d/blacklist.conf
-      mode: 0644
+      mode: 0444
       contents:
         inline: |
           blacklist usb-storage
     # disabe core user sudo access
     - path: /etc/sudoers.d/core-passwd
-      mode: 0644
+      mode: 0444
       contents:
         inline: |
           core	ALL=(ALL) 	ALL
