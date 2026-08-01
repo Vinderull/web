@@ -11,7 +11,10 @@
 {% block content %}
 <article>
     <h2>{{ post.title }}</h2>
-    <time class="post-date">{{ post.date_display }}</time>
+    <div class="post-meta">
+        <time class="post-date">{{ post.date_display }}</time>
+        <span class="reading-time">{{ post.reading_time }}-min read</span>
+    </div>
     {% if !post.toc.is_empty() %}
     <nav class="toc" aria-label="Table of contents">
         <h3>Table of Contents</h3>
