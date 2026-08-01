@@ -139,10 +139,11 @@ Startup order is deliberate (each step justifies the next):
   `ghcr.io/<owner>/web:latest` and `:<tag>`, then keyless-signs it with
   cosign and attaches a SLSA provenance attestation. `policy.json` enforces
   the signature on pull.
-- **Flatcar** (`flatcar.bu`) — Ignition provisioning: writes the quadlet units,
-  `Caddyfile` and `auth.json` (GHCR creds) to `/etc`, enables the
-  `flatcar-podman` sysext. The blog image is pulled from GHCR by the quadlet
-  (`Update=registry`); no on-box build/load step.
+- **Flatcar** (`flatcar.bu`) — Ignition provisioning: writes the quadlet units
+  and `Caddyfile` to `/etc`, enables the `flatcar-podman` sysext. The blog image
+  is pulled from the **public** GHCR package by the quadlet (`Update=registry`,
+  unauthenticated); no on-box build/load step. Supply-chain trust comes from
+  the cosign signature enforced by `policy.json`.
 
 ## Request lifecycle (`GET /posts/my-post`)
 Tracing span opens → router matches `/posts/{slug}` → axum injects cloned
