@@ -22,8 +22,8 @@ use tower_http::trace::TraceLayer;
 use askama::Template;
 use serde::Deserialize;
 use templates::{
-    IndexTemplate, PageTemplate, PostTemplate, SearchResultsTemplate, TagTemplate,
-    TagsIndexTemplate,
+    IndexTemplate, NotFoundTemplate, PageTemplate, PostTemplate, SearchResultsTemplate,
+    TagTemplate, TagsIndexTemplate,
 };
 
 #[derive(Clone)]
@@ -47,6 +47,8 @@ struct AppState {
     // Pre-rendered `/about` page (present only if `content/pages/about.md`
     // exists). Served like any other cached HTML page.
     about_page: Option<(Bytes, HeaderValue)>,
+    // Pre-rendered 404 page, served on any unknown path or unknown slug/tag.
+    not_found_html: Bytes,
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
@@ -68,6 +70,12 @@ pub fn build_app(
     .context("rendering index template")?;
     let index_etag = etag_for(index_html.as_bytes());
     let index_html = Bytes::from(index_html);
+
+    let not_found_html = Bytes::from(
+        NotFoundTemplate
+            .render()
+            .context("rendering 404 template")?,
+    );
 
     let mut post_pages = HashMap::with_capacity(posts.len());
     let posts_slice = posts.as_slice();
@@ -130,6 +138,7 @@ pub fn build_app(
         tags_index_etag,
         tag_pages,
         about_page,
+        not_found_html,
     };
 
     Ok(Router::new()
@@ -143,6 +152,7 @@ pub fn build_app(
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
+        .fallback(not_found)
         .with_state(state))
 }
 
@@ -158,18 +168,18 @@ async fn post(
     State(state): State<AppState>,
     AxumPath(slug): AxumPath<String>,
     headers: HeaderMap,
-) -> Result<Response, StatusCode> {
-    let (html, etag) = state
-        .post_pages
-        .get(&slug)
-        .cloned()
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(cached_html(headers, html, etag))
+) -> Response {
+    match state.post_pages.get(&slug).cloned() {
+        Some((html, etag)) => cached_html(headers, html, etag),
+        None => not_found_response(&state),
+    }
 }
 
-async fn about(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
-    let (html, etag) = state.about_page.clone().ok_or(StatusCode::NOT_FOUND)?;
-    Ok(cached_html(headers, html, etag))
+async fn about(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match state.about_page.clone() {
+        Some((html, etag)) => cached_html(headers, html, etag),
+        None => not_found_response(&state),
+    }
 }
 
 async fn teapot() -> Response {
@@ -200,13 +210,29 @@ async fn tag(
     State(state): State<AppState>,
     AxumPath(tag): AxumPath<String>,
     headers: HeaderMap,
-) -> Result<Response, StatusCode> {
-    let (html, etag) = state
-        .tag_pages
-        .get(&tag)
-        .cloned()
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(cached_html(headers, html, etag))
+) -> Response {
+    match state.tag_pages.get(&tag).cloned() {
+        Some((html, etag)) => cached_html(headers, html, etag),
+        None => not_found_response(&state),
+    }
+}
+
+/// Fallback for any path that matches no route.
+async fn not_found(State(state): State<AppState>) -> Response {
+    not_found_response(&state)
+}
+
+/// Build the shared custom 404 response: the pre-rendered page with a 404
+/// status and no caching (a 404 should never be cached).
+fn not_found_response(state: &AppState) -> Response {
+    let mut resp = Response::new(Body::from(state.not_found_html.clone()));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    (StatusCode::NOT_FOUND, resp).into_response()
 }
 
 /// Collect the sorted set of tags with per-tag post counts.
@@ -327,6 +353,8 @@ fn etag_for(s: &[u8]) -> HeaderValue {
 mod tests {
     use super::*;
     use axum::http::header;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
 
     fn req_with_inm(etag: Option<&str>) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -564,5 +592,51 @@ mod tests {
 
         // A garbage query returns nothing.
         assert!(search_posts(&posts, "qqqqzzzznope").is_empty());
+    }
+
+    // Unknown paths and unknown slugs/tags all yield the custom 404 page.
+    async fn not_found_body(uri: &str) -> (StatusCode, String) {
+        let app = build_app(Vec::new(), None, Path::new("static")).unwrap();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let body = String::from_utf8(
+            resp.into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .to_vec(),
+        )
+        .unwrap();
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn unknown_path_returns_custom_404() {
+        let (status, body) = not_found_body("/nope").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("404"), "should render the custom 404 page");
+    }
+
+    #[tokio::test]
+    async fn unknown_slug_returns_custom_404() {
+        let (status, body) = not_found_body("/posts/nope").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("404"), "should render the custom 404 page");
+    }
+
+    #[tokio::test]
+    async fn missing_about_returns_custom_404() {
+        let (status, body) = not_found_body("/about").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("404"), "should render the custom 404 page");
     }
 }
