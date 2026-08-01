@@ -400,6 +400,7 @@ mod tests {
             description: None,
             tags: Vec::new(),
             html: String::new(),
+            toc: String::new(),
             reading_time: 1,
         }
     }
