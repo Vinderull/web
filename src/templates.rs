@@ -1,6 +1,6 @@
 use askama::Template;
 
-use crate::posts::Post;
+use crate::posts::{Page, Post};
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -16,6 +16,12 @@ pub struct PostTemplate<'a> {
     pub newer: Option<&'a Post>,
     /// Chronologically older post (later in the descending-sorted list).
     pub older: Option<&'a Post>,
+}
+
+#[derive(Template)]
+#[template(path = "page.html")]
+pub struct PageTemplate<'a> {
+    pub page: &'a Page,
 }
 
 #[derive(Template)]

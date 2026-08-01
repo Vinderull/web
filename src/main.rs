@@ -17,6 +17,12 @@ fn main() -> anyhow::Result<()> {
     let loaded_posts = posts::load_all(&config.content_dir)?;
     tracing::info!("Loaded {} posts", loaded_posts.len());
 
+    // Load standalone pages alongside posts, before sandboxing (landlock
+    // denies reads outside static/ once applied).
+    let about_page = posts::load_pages(&config.content_dir)?
+        .into_iter()
+        .find(|p| p.slug == "about");
+
     // Bind listener before applying landlock (landlock would block bind on V4+)
     let listener = std::net::TcpListener::bind(&config.bind_addr)?;
     listener.set_nonblocking(true)?;
@@ -34,7 +40,7 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async {
         let listener = tokio::net::TcpListener::from_std(listener)?;
 
-        let app: Router = build_app(loaded_posts, &config.static_dir)?;
+        let app: Router = build_app(loaded_posts, about_page, &config.static_dir)?;
 
         let shutdown = async {
             let ctrl_c = tokio::signal::ctrl_c();

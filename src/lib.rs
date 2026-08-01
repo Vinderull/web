@@ -23,7 +23,8 @@ use tower_http::trace::TraceLayer;
 use askama::Template;
 use serde::Deserialize;
 use templates::{
-    IndexTemplate, PostTemplate, SearchResultsTemplate, TagTemplate, TagsIndexTemplate,
+    IndexTemplate, PageTemplate, PostTemplate, SearchResultsTemplate, TagTemplate,
+    TagsIndexTemplate,
 };
 
 #[derive(Clone)]
@@ -44,6 +45,9 @@ struct AppState {
     tags_index_etag: HeaderValue,
     // Pre-rendered `/tags/{tag}` post lists.
     tag_pages: Arc<HashMap<String, (Bytes, HeaderValue)>>,
+    // Pre-rendered `/about` page (present only if `content/pages/about.md`
+    // exists). Served like any other cached HTML page.
+    about_page: Option<(Bytes, HeaderValue)>,
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
@@ -52,7 +56,11 @@ struct AppState {
 /// once, so the request path is a pure lookup + header check with no
 /// per-request rendering. Posts are retained in `Arc` for the read-only
 /// `/search` and `/tags/*` routes.
-pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<Router> {
+pub fn build_app(
+    posts: Vec<posts::Post>,
+    about_page: Option<posts::Page>,
+    static_dir: &Path,
+) -> anyhow::Result<Router> {
     let posts = Arc::new(posts);
     let index_html = IndexTemplate {
         posts: posts.as_slice(),
@@ -101,6 +109,19 @@ pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<R
     }
     let tag_pages = Arc::new(tag_pages);
 
+    // Pre-render the standalone about page. It was loaded from disk *before*
+    // sandboxing (the request-path invariant is: no FS access except /static).
+    // Its absence is not an error — the `/about` route just 404s.
+    let about_page = about_page
+        .map(|page| {
+            let html = PageTemplate { page: &page }
+                .render()
+                .context("rendering about page")?;
+            let etag = etag_for(html.as_bytes());
+            Ok::<_, anyhow::Error>((Bytes::from(html), etag))
+        })
+        .transpose()?;
+
     let state = AppState {
         index_html,
         index_etag,
@@ -109,6 +130,7 @@ pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<R
         tags_index_html,
         tags_index_etag,
         tag_pages,
+        about_page,
     };
 
     Ok(Router::new()
@@ -117,6 +139,7 @@ pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<R
         .route("/search", get(search))
         .route("/tags", get(tags_index))
         .route("/tags/{tag}", get(tag))
+        .route("/about", get(about))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
@@ -141,6 +164,11 @@ async fn post(
         .get(&slug)
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(cached_html(headers, html, etag))
+}
+
+async fn about(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
+    let (html, etag) = state.about_page.clone().ok_or(StatusCode::NOT_FOUND)?;
     Ok(cached_html(headers, html, etag))
 }
 
