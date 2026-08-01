@@ -163,3 +163,72 @@ async fn search_with_no_match_returns_empty_state() {
         "should render the empty state"
     );
 }
+
+#[tokio::test]
+async fn tags_index_lists_all_tags() {
+    let posts = posts::load_all(Path::new("content")).unwrap();
+    let tags: Vec<String> = {
+        let mut set = std::collections::BTreeSet::new();
+        for p in &posts {
+            set.extend(p.tags.iter().cloned());
+        }
+        set.into_iter().collect()
+    };
+    let (status, _, body) = req(app(), "GET", "/tags", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(body).unwrap();
+    for t in tags {
+        assert!(
+            body.contains(&format!("/tags/{t}")),
+            "tags index should list tag {t}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tag_page_lists_posts_for_tag() {
+    let posts = posts::load_all(Path::new("content")).unwrap();
+    let tag = match posts.iter().flat_map(|p| &p.tags).next() {
+        Some(t) => t.clone(),
+        None => return, // no tagged content to test against
+    };
+    let (status, headers, body) = req(app(), "GET", &format!("/tags/{tag}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.contains_key(header::ETAG));
+    let body = String::from_utf8(body).unwrap();
+    assert!(
+        body.contains(&format!("#{tag}")),
+        "heading should name the tag"
+    );
+    for p in posts.iter().filter(|p| p.tags.contains(&tag)) {
+        assert!(
+            body.contains(&format!("/posts/{}", p.slug)),
+            "tag page should list post {}",
+            p.slug
+        );
+    }
+}
+
+#[tokio::test]
+async fn tag_page_404_for_unknown_tag() {
+    let (status, _, _) = req(app(), "GET", "/tags/does-not-exist", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn post_page_shows_tags() {
+    let posts = posts::load_all(Path::new("content")).unwrap();
+    let post = match posts.iter().find(|p| !p.tags.is_empty()) {
+        Some(p) => p,
+        None => return, // no tagged content
+    };
+    let (status, _, body) = req(app(), "GET", &format!("/posts/{}", post.slug), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(body).unwrap();
+    for t in &post.tags {
+        assert!(
+            body.contains(&format!("/tags/{t}")),
+            "post page should link to tag {t}"
+        );
+    }
+}

@@ -20,3 +20,17 @@ pub struct SearchResultsTemplate<'a> {
     pub posts: &'a [&'a Post],
     pub query: &'a str,
 }
+
+#[derive(Template)]
+#[template(path = "tags.html")]
+pub struct TagsIndexTemplate<'a> {
+    /// Sorted (tag, post-count) pairs.
+    pub tags: &'a [(String, usize)],
+}
+
+#[derive(Template)]
+#[template(path = "tag.html")]
+pub struct TagTemplate<'a> {
+    pub tag: &'a str,
+    pub posts: &'a [&'a Post],
+}

@@ -2,6 +2,7 @@
 title = "Hello World"
 date = "2024-01-15"
 description = "My first blog post"
+tags = ["rust", "hello"]
 +++
 
 # Hello World
