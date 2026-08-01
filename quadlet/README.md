@@ -23,11 +23,9 @@ you publish a GitHub Release (against a `v*` tag). The image is keyless-signed
 with cosign; `policy.json` rejects any pull whose signature doesn't match the
 `ci.yml@refs/tags/v*` OIDC identity.
 
-For a private GHCR package, authenticate Podman first (`podman login ghcr.io`).
-On Flatcar this is handled for you via `quadlet/auth.json` → `/etc/containers/auth.json`
-(see the Flatcar section); on a general host, run `podman login ghcr.io` once.
-
-To build locally for testing and feed it to the quadlet, build the `runtime`
+The image is served from a **public** GHCR package (no auth token to manage or
+commit), gated only by the cosign signature in `policy.json`. To build
+locally for testing and feed it to the quadlet, build the `runtime`
 target tagged to match `Image=`:
 
 ```sh
@@ -125,16 +123,15 @@ publish a GitHub Release against a `v*` tag (see
 image with `Update=registry`, so Podman pulls it from GHCR when the service
 starts — no `podman build`/`save`/`load`/`scp` round-trip is needed.
 
-Authentication to GHCR is handled by `quadlet/auth.json`, which the Ignition config
-writes to `/etc/containers/auth.json` (see `flatcar.bu`). The `podman` sysext picks
-it up automatically, so `Update=registry` pulls succeed out of the box. (For a
-public GHCR package this file is unnecessary; keep it only while the package is
-private, and never commit a real token to it.)
+The image is pulled unauthenticated from the public GHCR package; the `podman`
+sysext picks it up automatically, so `Update=registry` pulls succeed out of the
+box. The cosign signature in `policy.json` remains the integrity gate.
 
 ### 3. Render the Ignition config
 `flatcar.bu` (repo root) references the Caddyfile and quadlet units as local
-file includes. Convert it with Butane and pass the result as the instance
-user-data when provisioning the VPS:
+file includes — there is no `auth.json` or credential anywhere in the repo.
+Convert it with Butane and pass the result as the instance user-data when
+provisioning the VPS:
 
 ```sh
 # Install Butane: https://flatcar.org/docs/latest/provisioning/config-transpiler/
@@ -145,9 +142,9 @@ butane --pretty -d . flatcar.bu -o ignition.json
 Most providers (Hetzner, DigitalOcean, Equinix, Vultr) accept `ignition.json` as
 the user-data / custom Ignition field when booting a Flatcar stable image.
 On first boot Ignition writes `/etc/web/Caddyfile` and the six quadlet units
-under `/etc/containers/systemd/`, enables `web-pod.service`, writes `podman` to
-`/etc/flatcar/enabled-sysext.conf`, and writes `/etc/containers/auth.json`
-(GHCR credentials for the `Update=registry` pull).
+under `/etc/containers/systemd/`, enables `web-pod.service`, and writes `podman`
+to `/etc/flatcar/enabled-sysext.conf`. The blog image is pulled from GHCR on
+first start; the cosign signature check runs automatically via `policy.json`.
 
 Podman is **not** in the Flatcar base image; it is an opt-in system extension
 (sysext, available since 3941.0.0). The `enabled-sysext.conf` entry makes Flatcar
@@ -170,10 +167,9 @@ journalctl -u blog-container -f     # watch the image pull + app boot
 journalctl -u caddy-container -f    # watch Caddy obtain the Let's Encrypt cert
 ```
 
-> If the pull fails with `image not known` / `denied`, confirm
-> `/etc/containers/auth.json` has valid GHCR credentials (or that the GHCR
-> package is public). It is written by `flatcar.bu` from `quadlet/auth.json`;
-> re-render/re-apply the Ignition config if it's stale.
+> If the pull fails with `image not known` / `access denied`, confirm the GHCR
+> package (`ghcr.io/vinderull/web`) is public so the unauthenticated pull
+> succeeds, and that the cosign signature matches `policy.json`.
 
 ### Updating the blog
 Publishing a GitHub Release (against a `v*` tag) triggers CI to build, push

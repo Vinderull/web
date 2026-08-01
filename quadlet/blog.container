@@ -9,11 +9,7 @@ ContainerName=blog
 Pod=web.pod
 AutoUpdate=registry
 Pull=newer
-# /etc/containers/auth.json (GHCR creds) is written by the Flatcar Ignition
-# config. The label drives `podman-auto-update` pulls; --authfile drives the
-# initial `podman run` pull.
-Label=io.containers.autoupdate.authfile=/etc/containers/auth.json
-PodmanArgs=--authfile=/etc/containers/auth.json
+# Image pulled unauthenticated from the public GHCR package; no auth file.
 # Reachable inside the pod at 127.0.0.1:3000; no host publish needed.
 User=65532:65532
 ReadOnly=true
