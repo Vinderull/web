@@ -331,6 +331,41 @@ mod tests {
     }
 
     #[test]
+    fn cached_html_304_on_csv_etag_list() {
+        // If-None-Match may list several ETags; a match anywhere is a 304.
+        let resp = cached_html(
+            req_with_inm(Some("\"other\", \"abc\"")),
+            Bytes::from_static(b"hello"),
+            HeaderValue::from_static("\"abc\""),
+        );
+        assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[test]
+    fn cached_html_sets_security_headers() {
+        let resp = cached_html(
+            req_with_inm(None),
+            Bytes::from_static(b"hello"),
+            HeaderValue::from_static("\"abc\""),
+        );
+        let h = resp.headers();
+        assert_eq!(h.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+        assert_eq!(h.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert_eq!(
+            h.get(header::REFERRER_POLICY).unwrap(),
+            "strict-origin-when-cross-origin"
+        );
+        assert_eq!(
+            h.get(header::CONTENT_SECURITY_POLICY).unwrap(),
+            "default-src 'self'; style-src 'self'; script-src 'self'"
+        );
+        assert_eq!(
+            h.get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
+    }
+
+    #[test]
     fn etag_stable_for_same_input() {
         assert_eq!(etag_for(b"hello"), etag_for(b"hello"));
         assert_ne!(etag_for(b"hello"), etag_for(b"world"));
@@ -402,6 +437,27 @@ mod tests {
             "oldest should link only to newer"
         );
         assert!(!oldest.contains("/posts/newest"));
+    }
+
+    #[test]
+    fn single_post_has_no_nav() {
+        let posts = vec![fake_post("only")];
+        let pages = build_post_pages(&posts);
+        let html = String::from_utf8(pages["only"].0.to_vec()).unwrap();
+        assert!(!html.contains("post-nav"), "single post should have no nav");
+    }
+
+    #[test]
+    fn collect_tags_sorts_and_counts() {
+        let mut posts = vec![fake_post("a"), fake_post("b"), fake_post("c")];
+        posts[0].tags = vec!["rust".into(), "web".into()];
+        posts[1].tags = vec!["rust".into()];
+        let tags = collect_tags(&posts);
+        assert_eq!(
+            tags,
+            vec![("rust".to_string(), 2), ("web".to_string(), 1),],
+            "tags sorted alphabetically with per-tag post counts"
+        );
     }
 
     #[test]

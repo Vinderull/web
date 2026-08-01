@@ -102,6 +102,30 @@ async fn static_asset_served() {
 }
 
 #[tokio::test]
+async fn static_asset_missing_returns_404() {
+    let (status, _, _) = req(app(), "GET", "/static/nope.css", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn index_sets_security_headers() {
+    let (_, headers, _) = req(app(), "GET", "/", None).await;
+    assert_eq!(
+        headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+        "nosniff"
+    );
+    assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+    assert_eq!(
+        headers.get(header::REFERRER_POLICY).unwrap(),
+        "strict-origin-when-cross-origin"
+    );
+    assert_eq!(
+        headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
+        "default-src 'self'; style-src 'self'; script-src 'self'"
+    );
+}
+
+#[tokio::test]
 async fn post_page_304_on_matching_etag() {
     let posts = posts::load_all(Path::new("content")).expect("load posts");
     let slug = match posts.first() {
