@@ -117,6 +117,24 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
         HeaderValue::from_static("public, max-age=60, s-maxage=600"),
     );
     resp.headers_mut().insert(header::ETAG, etag);
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    resp.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    resp.headers_mut()
+        .insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    resp.headers_mut().insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    resp.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'self'; style-src 'self'; script-src 'self'"),
+    );
     resp
 }
 

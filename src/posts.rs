@@ -103,9 +103,14 @@ fn render_markdown(markdown: &str) -> String {
     options.insert(Options::ENABLE_TASKLISTS);
 
     let parser = Parser::new_ext(markdown, options);
-    let mut output = String::new();
-    html::push_html(&mut output, parser);
-    output
+    let mut raw_html = String::new();
+    html::push_html(&mut raw_html, parser);
+
+    let mut cleaner = ammonia::Builder::new();
+    cleaner
+        .add_tags(&["input"])
+        .add_tag_attributes("input", &["type", "checked", "disabled"]);
+    cleaner.clean(&raw_html).to_string()
 }
 
 fn format_date(date_str: &str) -> Result<String> {
