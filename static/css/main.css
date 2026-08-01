@@ -225,3 +225,25 @@ article .post-date {
     color: #666;
     font-size: 0.9rem;
 }
+
+.post-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.post-nav div {
+    flex: 1;
+}
+
+.post-nav .nav-older {
+    text-align: right;
+}
+
+.nav-link {
+    display: block;
+    text-decoration: none;
+}

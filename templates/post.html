@@ -31,6 +31,20 @@
     <div class="post-content">
         {{ post.html|safe }}
     </div>
+    {% if newer.is_some() || older.is_some() %}
+    <nav class="post-nav" aria-label="Post navigation">
+        <div>
+        {% if let Some(n) = newer %}
+            <a class="nav-link nav-newer" href="/posts/{{ n.slug }}">&larr; {{ n.title }}</a>
+        {% endif %}
+        </div>
+        <div>
+        {% if let Some(o) = older %}
+            <a class="nav-link nav-older" href="/posts/{{ o.slug }}">{{ o.title }} &rarr;</a>
+        {% endif %}
+        </div>
+    </nav>
+    {% endif %}
 </article>
 <p><a href="/">&larr; Back to posts</a></p>
 {% endblock %}
