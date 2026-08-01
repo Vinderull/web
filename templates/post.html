@@ -12,6 +12,12 @@
 <article>
     <h2>{{ post.title }}</h2>
     <time class="post-date">{{ post.date_display }}</time>
+    {% if !post.toc.is_empty() %}
+    <nav class="toc" aria-label="Table of contents">
+        <h3>Table of Contents</h3>
+        {{ post.toc|safe }}
+    </nav>
+    {% endif %}
     <div class="post-content">
         {{ post.html|safe }}
     </div>

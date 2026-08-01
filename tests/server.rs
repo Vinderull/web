@@ -72,6 +72,13 @@ async fn post_page_200_for_known_slug() {
         body.contains("<article>"),
         "post should render article wrapper"
     );
+    // hello-world.md has h2 headings, so the precomputed ToC nav should render.
+    if posts.iter().any(|p| p.slug == *slug && !p.toc.is_empty()) {
+        assert!(
+            body.contains("Table of Contents") && body.contains("class=\"toc\""),
+            "post page should include the ToC nav"
+        );
+    }
 }
 
 #[tokio::test]

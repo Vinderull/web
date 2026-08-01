@@ -45,13 +45,17 @@ truth. Posts are read **once at startup**, never at request time.
    blocks fall back to raw content).
 2. `toml::from_str` → `FrontMatter { title, date, description }`.
 3. `render_markdown` — `pulldown-cmark` with tables, footnotes, strikethrough,
-   task lists enabled; output is HTML strings. No syntax-highlighting pass.
+   task lists enabled; output is HTML strings. In the same parse pass it
+   collects headings, slugifies them into stable `id` anchors (deduped on
+   collision), writes those ids back onto the `<h1>`–`<h6>` tags, and produces
+   a nested **table of contents** (`h2+` only; `h1` is the post title). No
+   syntax-highlighting pass.
 4. `format_date` — `YYYY-MM-DD` → `"[month repr:long] [day], [year]"` via the
    `time` crate.
 
 Result: `Vec<Post>` sorted by date **descending**, each `Post` carrying its
-slug, title, display date, optional description, and **pre-rendered HTML**.
-Rendering never happens on the request path.
+slug, title, display date, optional description, pre-rendered body HTML, and
+**pre-rendered ToC HTML**. Rendering never happens on the request path.
 
 ### 3. Template layer — Askama compile-time templates (`templates/`)
 Three templates compiled by Askama at build time (type-checked, zero runtime
@@ -61,7 +65,8 @@ parsing):
   `/static/js/htmx.min.js`, sets `hx-boost="true"` on `<body>`.
 - `index.html` — extends `base`, lists all posts (title + date → `/posts/{slug}`).
 - `post.html` — extends `base`, renders one post's pre-baked HTML via
-  `{{ post.html|safe }}`, optional `<meta description>` in the `head` block.
+  `{{ post.html|safe }}`, a precomputed `{{ post.toc|safe }}` nav (empty posts
+  omit it), and an optional `<meta description>` in the `head` block.
 
 Rust sides (`src/templates.rs`): `IndexTemplate<'a> { posts: &'a [Post] }` and
 `PostTemplate<'a> { post: &'a Post }` — they borrow the in-memory `Post`s.
