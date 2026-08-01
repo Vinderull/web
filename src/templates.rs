@@ -3,6 +3,10 @@ use askama::Template;
 use crate::posts::{Page, Post};
 
 #[derive(Template)]
+#[template(path = "404.html")]
+pub struct NotFoundTemplate;
+
+#[derive(Template)]
 #[template(path = "index.html")]
 pub struct IndexTemplate<'a> {
     pub posts: &'a [Post],
