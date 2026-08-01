@@ -16,6 +16,7 @@ pub struct Post {
     pub tags: Vec<String>,
     pub html: String,
     pub toc: String,
+    pub reading_time: u32,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +69,7 @@ fn parse_post(slug: &str, content: &str) -> Result<Post> {
 
     let (html, toc) = render_markdown(markdown);
     let date_display = format_date(&fm.date)?;
+    let reading_time = estimate_reading_time(markdown);
 
     Ok(Post {
         slug: slug.to_string(),
@@ -78,7 +80,15 @@ fn parse_post(slug: &str, content: &str) -> Result<Post> {
         tags: fm.tags,
         html,
         toc,
+        reading_time,
     })
+}
+
+/// Estimate reading time in whole minutes from the raw markdown word count
+/// (≈200 words/min). Always at least 1 minute.
+fn estimate_reading_time(markdown: &str) -> u32 {
+    let words = markdown.split_whitespace().count();
+    (words / 200).max(1) as u32
 }
 
 /// Split TOML frontmatter (delimited by `+++`) from markdown body.
@@ -341,6 +351,24 @@ mod tests {
         let (fm, md) = split_frontmatter(input);
         assert!(fm.contains("title = \"T\""));
         assert_eq!(md, "Body");
+    }
+
+    #[test]
+    fn test_estimate_reading_time() {
+        assert_eq!(
+            estimate_reading_time(""),
+            1,
+            "empty body still counts as 1 min"
+        );
+        assert_eq!(estimate_reading_time("word"), 1);
+        let body = "word ".repeat(400);
+        assert_eq!(
+            estimate_reading_time(&body),
+            2,
+            "400 words ≈ 2 min at 200 wpm"
+        );
+        let body = "word ".repeat(200);
+        assert_eq!(estimate_reading_time(&body), 1);
     }
 
     #[test]

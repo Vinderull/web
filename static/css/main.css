@@ -213,3 +213,15 @@ article .post-date {
 .tag-count {
     color: #666;
 }
+
+.post-meta {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+}
+
+.reading-time {
+    color: #666;
+    font-size: 0.9rem;
+}
