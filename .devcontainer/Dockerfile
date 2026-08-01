@@ -16,7 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && rustup target add ${MUSL_TARGET}
 WORKDIR /build
 COPY . .
-RUN cargo build --release --target ${MUSL_TARGET}
+# Buildkit cache mounts persist the cargo registry + target dir across builds,
+# so redeploys only recompile changed crates instead of the full tree.
+# The target dir is a cache mount (ephemeral, not in the image layer), so the
+# binary is copied out of it within the same RUN; a later COPY can't see it.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --target ${MUSL_TARGET} \
+    && cp target/${MUSL_TARGET}/release/web /web
 
 # ---- Runtime stage (for deployment) ----
 # Distroless static: no shell, no package manager, no libc (binary is musl-static).
@@ -24,7 +31,7 @@ RUN cargo build --release --target ${MUSL_TARGET}
 FROM gcr.io/distroless/static-debian13:nonroot AS runtime
 ARG MUSL_TARGET
 WORKDIR /app
-COPY --from=builder /build/target/${MUSL_TARGET}/release/web /app/web
+COPY --from=builder /web /app/web
 COPY --from=builder /build/content /app/content
 COPY --from=builder /build/static /app/static
 ENV CONTENT_DIR=/app/content \
