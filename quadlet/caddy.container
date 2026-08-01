@@ -1,22 +1,27 @@
 [Unit]
-Description=Caddy 2 reverse proxy (TLS terminator)
+Description=Caddy reverse proxy (TLS terminator)
 After=blog-container.service
 Requires=blog-container.service
 RequiresMountsFor=/etc/web/Caddyfile
 # Pod= auto-generates Requires=/After= on web-pod.service.
 
 [Container]
-Image=docker.io/caddy:2
+Image=docker.io/caddy:2.11.4-alpine
 ContainerName=caddy
 Pod=web.pod
 ReadOnly=true
+AutoUpdate=registry
+Pull=newer
 DropCapability=all
+AddCapability=NET_BIND_SERVICE
 # Bind-mount the Caddyfile read-only. On the VPS this is /etc/web/Caddyfile
 # (written by the Flatcar Ignition config); locally it's wherever you install it.
 Volume=/etc/web/Caddyfile:/etc/caddy/Caddyfile:ro
 # Named volumes via the Quadlet .volume units below.
 Volume=caddy-data.volume:/data
 Volume=caddy-config.volume:/config
+# ponytail: generous headroom for TLS/ACME work; tighten once traffic profile is known.
+PodmanArgs=--memory=256m --cpus=1 --pids-limit=256 --ulimit nofile=4096:4096
 
 [Service]
 Restart=always
