@@ -139,6 +139,7 @@ pub fn build_app(
         .route("/tags", get(tags_index))
         .route("/tags/{tag}", get(tag))
         .route("/about", get(about))
+        .route("/teapot", get(teapot))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
@@ -169,6 +170,19 @@ async fn post(
 async fn about(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
     let (html, etag) = state.about_page.clone().ok_or(StatusCode::NOT_FOUND)?;
     Ok(cached_html(headers, html, etag))
+}
+
+async fn teapot() -> Response {
+    // Easter egg. Short-circuits before any real route; deliberately no
+    // caching/state so it stays zero-cost and invisible to real traffic.
+    let mut resp = Response::new(Body::from(
+        "418 I'm a teapot\n\nI'm a little teapot, short and stout.\n\n         Here is my handle, here is my spout.\n         When I get all steamed up then I shout:\n         tip me over and pour me out!\n",
+    ));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    (StatusCode::IM_A_TEAPOT, resp).into_response()
 }
 
 async fn tags_index(

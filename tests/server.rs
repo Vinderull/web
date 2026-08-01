@@ -296,3 +296,15 @@ async fn about_link_present_in_header() {
         "base layout should link to /about"
     );
 }
+
+#[tokio::test]
+async fn teapot_returns_418_with_poem() {
+    let (status, headers, body) = req(app(), "GET", "/teapot", None).await;
+    assert_eq!(status, StatusCode::IM_A_TEAPOT);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/plain; charset=utf-8"
+    );
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("I'm a little teapot"));
+}
