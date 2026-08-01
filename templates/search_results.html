@@ -1,0 +1,14 @@
+<ul class="post-list" id="post-list">
+{% if posts.is_empty() %}
+<li class="search-empty">No posts match "{{ query }}".</li>
+{% else %}
+{% for post in posts %}
+    <li>
+        <a href="/posts/{{ post.slug }}">
+            <span class="post-title">{{ post.title }}</span>
+            <time class="post-date">{{ post.date_display }}</time>
+        </a>
+    </li>
+{% endfor %}
+{% endif %}
+</ul>

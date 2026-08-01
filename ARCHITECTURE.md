@@ -63,7 +63,8 @@ parsing):
 - `base.html` — shared layout: `<head>`, `<header>`, `<main>` block,
   `<footer>` (copyright + MIT notice), loads `/static/css/main.css` and
   `/static/js/htmx.min.js`, sets `hx-boost="true"` on `<body>`.
-- `index.html` — extends `base`, lists all posts (title + date → `/posts/{slug}`).
+- `index.html` — extends `base`, lists all posts (title + date → `/posts/{slug}`)
+  and a search field that `hx-get`s `/search`, swapping the list in place.
 - `post.html` — extends `base`, renders one post's pre-baked HTML via
   `{{ post.html|safe }}`, a precomputed `{{ post.toc|safe }}` nav (empty posts
   omit it), and an optional `<meta description>` in the `head` block.
@@ -77,6 +78,7 @@ A `Router` with shared `AppState { posts: Arc<Vec<Post>> }`:
 |-------|---------|---------|
 | `GET /` | `index` | rendered `index.html` (`Html<String>`) |
 | `GET /posts/{slug}` | `post` | rendered `post.html`; O(n) search → `404` if miss |
+| `GET /search` | `search` | htmx fragment `<ul id="post-list">`; scans in-memory posts, `no-store` |
 | `GET /healthz` | inline | `"ok"` as `text/plain` (Caddy health gate) |
 | `GET /static/*` | `ServeDir` | files streamed from `static/` (tower-http `fs`) |
 
