@@ -75,8 +75,13 @@ parsing):
 - `tags.html` / `tag.html` — extends `base`; the former lists every tag (with
   post counts) linking to `/tags/{tag}`, the latter lists the posts for one tag.
   Both are pre-rendered at boot like the index.
+- `page.html` — extends `base`, renders a standalone page (e.g. `/about`) from
+  `content/pages/*.md`. Pages have no date/tags/ToC/reading time.
+
 Rust sides (`src/templates.rs`): `IndexTemplate<'a> { posts: &'a [Post] }` and
 `PostTemplate<'a> { post: &'a Post }` — they borrow the in-memory `Post`s.
+`PageTemplate<'a> { page: &'a Page }` renders the about page (present only if
+`content/pages/about.md` exists).
 
 ### 4. Web server layer — axum 0.8 + tower-http (`src/main.rs`)
 A `Router` with shared `AppState { posts: Arc<Vec<Post>> }`:

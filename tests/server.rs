@@ -10,7 +10,11 @@ use web::{build_app, posts};
 /// Wire up the real app against the repo's content/ and static/ dirs.
 fn app() -> Router {
     let posts = posts::load_all(Path::new("content")).expect("load posts");
-    build_app(posts, Path::new("static")).expect("build app")
+    let about = posts::load_pages(Path::new("content"))
+        .unwrap()
+        .into_iter()
+        .find(|p| p.slug == "about");
+    build_app(posts, about, Path::new("static")).expect("build app")
 }
 
 /// Drive a request through the router in-process (no TCP socket) and return
@@ -255,4 +259,40 @@ async fn post_page_shows_tags() {
             "post page should link to tag {t}"
         );
     }
+}
+
+#[tokio::test]
+async fn about_page_200_with_cache_headers() {
+    let (status, headers, body) = req(app(), "GET", "/about", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "public, max-age=60, s-maxage=600"
+    );
+    assert!(headers.contains_key(header::ETAG));
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("About"), "about should render its title");
+    assert!(
+        body.contains("Colophon"),
+        "about should render markdown body"
+    );
+}
+
+#[tokio::test]
+async fn about_page_304_on_matching_etag() {
+    let (_, headers, _) = req(app(), "GET", "/about", None).await;
+    let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
+    let (status, _, body) = req(app(), "GET", "/about", Some(etag)).await;
+    assert_eq!(status, StatusCode::NOT_MODIFIED);
+    assert!(body.is_empty(), "304 must have no body");
+}
+
+#[tokio::test]
+async fn about_link_present_in_header() {
+    let (_, _, body) = req(app(), "GET", "/", None).await;
+    let body = String::from_utf8(body).unwrap();
+    assert!(
+        body.contains(r#"<a href="/about">About</a>"#),
+        "base layout should link to /about"
+    );
 }

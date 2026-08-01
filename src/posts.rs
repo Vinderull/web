@@ -20,6 +20,16 @@ pub struct Post {
     pub reading_time: u32,
 }
 
+/// A standalone page (e.g. `/about`) — not a dated, listable post. Rendered
+/// to pre-baked HTML at boot like posts, but with no date/tags/ToC/reading
+/// time. Loaded from `content/pages/`.
+#[derive(Debug, Clone)]
+pub struct Page {
+    pub slug: String,
+    pub title: String,
+    pub html: String,
+}
+
 #[derive(Deserialize)]
 struct FrontMatter {
     title: String,
@@ -28,6 +38,11 @@ struct FrontMatter {
     description: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct PageFrontMatter {
+    title: String,
 }
 
 pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
@@ -62,6 +77,53 @@ pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
 
     posts.sort_by(|a, b| b.date.cmp(&a.date));
     Ok(posts)
+}
+
+/// Load standalone pages from `content/pages/*.md`. Same markdown pipeline as
+/// posts, but frontmatter only carries a `title` (no date/tags). Returns an
+/// empty vec if `content/pages` doesn't exist.
+pub fn load_pages(content_dir: &Path) -> Result<Vec<Page>> {
+    let pages_dir = content_dir.join("pages");
+    let mut pages = Vec::new();
+
+    if !pages_dir.exists() {
+        tracing::warn!("Pages directory not found: {}", pages_dir.display());
+        return Ok(pages);
+    }
+
+    for entry in std::fs::read_dir(&pages_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+
+        let slug = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .context("invalid filename")?
+            .to_string();
+
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+
+        let page =
+            parse_page(&slug, &content).with_context(|| format!("parsing {}", path.display()))?;
+        pages.push(page);
+    }
+
+    Ok(pages)
+}
+
+fn parse_page(slug: &str, content: &str) -> Result<Page> {
+    let (frontmatter, markdown) = split_frontmatter(content);
+    let fm: PageFrontMatter = toml::from_str(&frontmatter).context("parsing frontmatter")?;
+    let (html, _) = render_markdown(markdown);
+    Ok(Page {
+        slug: slug.to_string(),
+        title: fm.title,
+        html,
+    })
 }
 
 fn parse_post(slug: &str, content: &str) -> Result<Post> {
@@ -608,6 +670,36 @@ mod tests {
         assert_eq!(posts.len(), 2);
         assert_eq!(posts[0].slug, "newer", "newest post first");
         assert_eq!(posts[1].slug, "older");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_pages_missing_dir_returns_empty() {
+        let dir = std::env::temp_dir().join("web_test_nonexistent_pages");
+        let _ = std::fs::remove_dir_all(&dir);
+        let pages = load_pages(&dir).unwrap();
+        assert!(pages.is_empty());
+    }
+
+    #[test]
+    fn test_load_pages_parses_markdown_and_ignores_non_md() {
+        let dir = std::env::temp_dir().join("web_test_pages");
+        let pages_subdir = dir.join("pages");
+        std::fs::create_dir_all(&pages_subdir).unwrap();
+
+        std::fs::write(
+            pages_subdir.join("about.md"),
+            "+++\ntitle = \"About Me\"\n+++\nHello **world**.",
+        )
+        .unwrap();
+        std::fs::write(pages_subdir.join("readme.txt"), "ignore").unwrap();
+
+        let pages = load_pages(&dir).unwrap();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].slug, "about");
+        assert_eq!(pages[0].title, "About Me");
+        assert!(pages[0].html.contains("<strong>world</strong>"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

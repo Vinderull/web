@@ -15,6 +15,7 @@ Personal blog built with Rust, axum, and htmx.
 
 ```
 content/posts/     Markdown posts with TOML frontmatter
+content/pages/     Standalone pages (e.g. about.md -> /about)
 static/            CSS, JS (htmx self-hosted)
 templates/         Askama HTML templates
 src/
