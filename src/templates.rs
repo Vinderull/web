@@ -12,6 +12,10 @@ pub struct IndexTemplate<'a> {
 #[template(path = "post.html")]
 pub struct PostTemplate<'a> {
     pub post: &'a Post,
+    /// Chronologically newer post (earlier in the descending-sorted list).
+    pub newer: Option<&'a Post>,
+    /// Chronologically older post (later in the descending-sorted list).
+    pub older: Option<&'a Post>,
 }
 
 #[derive(Template)]

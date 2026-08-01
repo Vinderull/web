@@ -63,10 +63,17 @@ pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<R
     let index_html = Bytes::from(index_html);
 
     let mut post_pages = HashMap::with_capacity(posts.len());
-    for p in posts.as_slice() {
-        let html = PostTemplate { post: p }
-            .render()
-            .with_context(|| format!("rendering post {}", p.slug))?;
+    let posts_slice = posts.as_slice();
+    for (i, p) in posts_slice.iter().enumerate() {
+        let newer = (i > 0).then(|| &posts_slice[i - 1]);
+        let older = (i + 1 < posts_slice.len()).then(|| &posts_slice[i + 1]);
+        let html = PostTemplate {
+            post: p,
+            newer,
+            older,
+        }
+        .render()
+        .with_context(|| format!("rendering post {}", p.slug))?;
         let etag = etag_for(html.as_bytes());
         post_pages.insert(p.slug.clone(), (Bytes::from(html), etag));
     }
@@ -333,12 +340,68 @@ mod tests {
     // mirrors the boot pipeline and guards against regressions there.
     fn build_post_pages(posts: &[posts::Post]) -> HashMap<String, (Bytes, HeaderValue)> {
         let mut map = HashMap::new();
-        for p in posts {
-            let html = PostTemplate { post: p }.render().unwrap();
+        for (i, p) in posts.iter().enumerate() {
+            let newer = (i > 0).then(|| &posts[i - 1]);
+            let older = (i + 1 < posts.len()).then(|| &posts[i + 1]);
+            let html = PostTemplate {
+                post: p,
+                newer,
+                older,
+            }
+            .render()
+            .unwrap();
             let etag = etag_for(html.as_bytes());
             map.insert(p.slug.clone(), (Bytes::from(html), etag));
         }
         map
+    }
+
+    fn fake_post(slug: &str) -> posts::Post {
+        posts::Post {
+            slug: slug.to_string(),
+            title: slug.to_string(),
+            date: "2024-01-01".to_string(),
+            date_display: "January 1, 2024".to_string(),
+            description: None,
+            tags: Vec::new(),
+            html: String::new(),
+            reading_time: 1,
+        }
+    }
+
+    #[test]
+    fn post_nav_renders_prev_and_next() {
+        // Sorted newest-first, so [0] is newer than [1].
+        let posts = vec![
+            fake_post("newest"),
+            fake_post("middle"),
+            fake_post("oldest"),
+        ];
+        let pages = build_post_pages(&posts);
+
+        let newest = String::from_utf8(pages["newest"].0.to_vec()).unwrap();
+        assert!(
+            newest.contains("middle"),
+            "newest should link only to older"
+        );
+        assert!(!newest.contains("/posts/oldest"));
+
+        let middle = String::from_utf8(pages["middle"].0.to_vec()).unwrap();
+        assert!(
+            middle.contains("/posts/newest"),
+            "middle should link to newer"
+        );
+        assert!(
+            middle.contains("/posts/oldest"),
+            "middle should link to older"
+        );
+
+        let oldest = String::from_utf8(pages["oldest"].0.to_vec()).unwrap();
+        assert!(
+            oldest.contains("/posts/middle"),
+            "oldest should link only to newer"
+        );
+        assert!(!oldest.contains("/posts/newest"));
     }
 
     #[test]
