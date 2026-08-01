@@ -167,3 +167,27 @@ article .post-date {
     opacity: 0;
     transition: opacity 200ms ease-in;
 }
+
+.search {
+    margin-bottom: 1.5rem;
+}
+
+.search input[type="search"] {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 1rem;
+    font-family: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.search input[type="search"]:focus {
+    outline: none;
+    border-color: var(--link);
+}
+
+.search-empty {
+    color: #666;
+}

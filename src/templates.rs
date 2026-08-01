@@ -13,3 +13,10 @@ pub struct IndexTemplate<'a> {
 pub struct PostTemplate<'a> {
     pub post: &'a Post,
 }
+
+#[derive(Template)]
+#[template(path = "search_results.html")]
+pub struct SearchResultsTemplate<'a> {
+    pub posts: &'a [&'a Post],
+    pub query: &'a str,
+}

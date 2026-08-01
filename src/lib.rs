@@ -12,7 +12,7 @@ use anyhow::Context;
 use axum::{
     Router,
     body::{Body, Bytes},
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
@@ -21,7 +21,8 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use askama::Template;
-use templates::{IndexTemplate, PostTemplate};
+use serde::Deserialize;
+use templates::{IndexTemplate, PostTemplate, SearchResultsTemplate};
 
 #[derive(Clone)]
 struct AppState {
@@ -33,6 +34,9 @@ struct AppState {
     // ponytail: flat HashMap; fine while posts fit in RAM. A DB-backed store
     // would replace this at corpus scale.
     post_pages: Arc<HashMap<String, (Bytes, HeaderValue)>>,
+    // The in-memory posts, retained for the read-only `/search` route which
+    // scans title/description/body at request time. Immutable after boot.
+    posts: Arc<Vec<posts::Post>>,
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
@@ -45,14 +49,17 @@ struct AppState {
 /// (e.g. a JSON API exposing title/date/description), retain the Vec (or a
 /// slimmed struct) by cloning what's needed before this call.
 pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<Router> {
-    let index_html = IndexTemplate { posts: &posts }
-        .render()
-        .context("rendering index template")?;
+    let posts = Arc::new(posts);
+    let index_html = IndexTemplate {
+        posts: posts.as_slice(),
+    }
+    .render()
+    .context("rendering index template")?;
     let index_etag = etag_for(index_html.as_bytes());
     let index_html = Bytes::from(index_html);
 
     let mut post_pages = HashMap::with_capacity(posts.len());
-    for p in &posts {
+    for p in posts.as_slice() {
         let html = PostTemplate { post: p }
             .render()
             .with_context(|| format!("rendering post {}", p.slug))?;
@@ -65,11 +72,13 @@ pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<R
         index_html,
         index_etag,
         post_pages,
+        posts,
     };
 
     Ok(Router::new()
         .route("/", get(index))
         .route("/posts/{slug}", get(post))
+        .route("/search", get(search))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
@@ -95,6 +104,53 @@ async fn post(
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(cached_html(headers, html, etag))
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: Option<String>,
+}
+
+/// Server-side search over the in-memory posts. Returns an HTML fragment
+/// (a `<ul id="post-list">`) that htmx swaps in place of the index's list.
+/// The body is deliberately not cached so re-searching always sees fresh
+/// results.
+async fn search(State(state): State<AppState>, Query(params): Query<SearchQuery>) -> Response {
+    let query = params.q.unwrap_or_default();
+    let results = search_posts(&state.posts, &query);
+    let body = SearchResultsTemplate {
+        posts: &results,
+        query: &query,
+    }
+    .render()
+    .unwrap_or_default();
+    let mut resp = Response::new(Body::from(body));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp
+}
+
+/// Case-insensitive substring match on title, description, or body. A blank
+/// query returns every post (so clearing the box restores the full list).
+fn search_posts<'a>(posts: &'a [posts::Post], query: &str) -> Vec<&'a posts::Post> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return posts.iter().collect();
+    }
+    posts
+        .iter()
+        .filter(|p| {
+            p.title.to_lowercase().contains(&q)
+                || p.description
+                    .as_deref()
+                    .is_some_and(|d| d.to_lowercase().contains(&q))
+                || p.html.to_lowercase().contains(&q)
+        })
+        .collect()
 }
 
 /// Build a weakly-caching HTML response: 304 on matching `If-None-Match`,
@@ -231,5 +287,42 @@ mod tests {
             assert!(etag.starts_with('"') && etag.ends_with('"'));
             assert_eq!(etag, etag_for(html.as_ref()).to_str().unwrap());
         }
+    }
+
+    #[test]
+    fn search_matches_title_description_and_body_case_insensitively() {
+        let posts = posts::load_all(std::path::Path::new("content")).unwrap();
+        if posts.is_empty() {
+            return;
+        }
+        // Every post must match an empty query.
+        assert_eq!(search_posts(&posts, "").len(), posts.len());
+        assert_eq!(search_posts(&posts, "   ").len(), posts.len());
+
+        // A title match, including a case-insensitive variant.
+        let by_title = search_posts(&posts, &posts[0].title);
+        assert!(
+            by_title.iter().any(|p| p.slug == posts[0].slug),
+            "title should match its own post"
+        );
+        assert!(
+            search_posts(&posts, &posts[0].title.to_uppercase())
+                .iter()
+                .any(|p| p.slug == posts[0].slug),
+            "title match should be case-insensitive"
+        );
+
+        // A description-only match.
+        if let Some(desc) = &posts[0].description {
+            assert!(
+                search_posts(&posts, desc)
+                    .iter()
+                    .any(|p| p.slug == posts[0].slug),
+                "description should match its own post"
+            );
+        }
+
+        // A garbage query returns nothing.
+        assert!(search_posts(&posts, "qqqqzzzznope").is_empty());
     }
 }

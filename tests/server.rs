@@ -117,3 +117,49 @@ async fn post_page_304_on_matching_etag() {
     assert_eq!(status, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty());
 }
+
+#[tokio::test]
+async fn search_returns_matching_posts() {
+    let (status, headers, body) = req(app(), "GET", "/search?q=hello", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "no-store",
+        "search responses must not be cached"
+    );
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("<ul"), "should render a list fragment");
+    assert!(
+        body.contains("/posts/hello-world"),
+        "should include the matching post"
+    );
+}
+
+#[tokio::test]
+async fn search_with_empty_query_returns_all_posts() {
+    let posts = posts::load_all(Path::new("content")).unwrap();
+    if posts.is_empty() {
+        return; // no content to test against
+    }
+    let (status, _, body) = req(app(), "GET", "/search?q=", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(body).unwrap();
+    for p in &posts {
+        assert!(
+            body.contains(&format!("/posts/{}", p.slug)),
+            "empty query should include every post ({})",
+            p.slug
+        );
+    }
+}
+
+#[tokio::test]
+async fn search_with_no_match_returns_empty_state() {
+    let (status, _, body) = req(app(), "GET", "/search?q=zzzznomatch", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(body).unwrap();
+    assert!(
+        body.contains("No posts match"),
+        "should render the empty state"
+    );
+}
