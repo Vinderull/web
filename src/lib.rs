@@ -22,7 +22,9 @@ use tower_http::trace::TraceLayer;
 
 use askama::Template;
 use serde::Deserialize;
-use templates::{IndexTemplate, PostTemplate, SearchResultsTemplate};
+use templates::{
+    IndexTemplate, PostTemplate, SearchResultsTemplate, TagTemplate, TagsIndexTemplate,
+};
 
 #[derive(Clone)]
 struct AppState {
@@ -34,20 +36,22 @@ struct AppState {
     // ponytail: flat HashMap; fine while posts fit in RAM. A DB-backed store
     // would replace this at corpus scale.
     post_pages: Arc<HashMap<String, (Bytes, HeaderValue)>>,
-    // The in-memory posts, retained for the read-only `/search` route which
-    // scans title/description/body at request time. Immutable after boot.
+    // The in-memory posts, retained for the read-only `/search` and `/tags/*`
+    // routes. Immutable after boot.
     posts: Arc<Vec<posts::Post>>,
+    // Pre-rendered `/tags` index (never empty).
+    tags_index_html: Bytes,
+    tags_index_etag: HeaderValue,
+    // Pre-rendered `/tags/{tag}` post lists.
+    tag_pages: Arc<HashMap<String, (Bytes, HeaderValue)>>,
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
 ///
-/// Pre-renders the index and every post page once, so the request path is a
-/// pure lookup + header check with no per-request rendering. `posts` is
-/// consumed and dropped here: each Post's raw markdown-body HTML is already
-/// baked into the corresponding `post_pages` entry, and no route reads the
-/// raw title/date/description fields. If a future route needs raw Post fields
-/// (e.g. a JSON API exposing title/date/description), retain the Vec (or a
-/// slimmed struct) by cloning what's needed before this call.
+/// Pre-renders the index, every post page, the tag index, and every tag page
+/// once, so the request path is a pure lookup + header check with no
+/// per-request rendering. Posts are retained in `Arc` for the read-only
+/// `/search` and `/tags/*` routes.
 pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<Router> {
     let posts = Arc::new(posts);
     let index_html = IndexTemplate {
@@ -68,17 +72,44 @@ pub fn build_app(posts: Vec<posts::Post>, static_dir: &Path) -> anyhow::Result<R
     }
     let post_pages = Arc::new(post_pages);
 
+    // Pre-render the tag index and one page per tag (sorted alphabetically).
+    let tags = collect_tags(&posts);
+    let tags_index_html = Bytes::from(
+        TagsIndexTemplate { tags: &tags }
+            .render()
+            .context("rendering tags index")?,
+    );
+    let tags_index_etag = etag_for(&tags_index_html);
+    let mut tag_pages = HashMap::with_capacity(tags.len());
+    for (tag, _) in &tags {
+        let list: Vec<&posts::Post> = posts
+            .iter()
+            .filter(|p| p.tags.iter().any(|t| t == tag))
+            .collect();
+        let html = TagTemplate { tag, posts: &list }
+            .render()
+            .with_context(|| format!("rendering tag {tag}"))?;
+        let etag = etag_for(html.as_bytes());
+        tag_pages.insert(tag.clone(), (Bytes::from(html), etag));
+    }
+    let tag_pages = Arc::new(tag_pages);
+
     let state = AppState {
         index_html,
         index_etag,
         post_pages,
         posts,
+        tags_index_html,
+        tags_index_etag,
+        tag_pages,
     };
 
     Ok(Router::new()
         .route("/", get(index))
         .route("/posts/{slug}", get(post))
         .route("/search", get(search))
+        .route("/tags", get(tags_index))
+        .route("/tags/{tag}", get(tag))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
@@ -104,6 +135,46 @@ async fn post(
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(cached_html(headers, html, etag))
+}
+
+async fn tags_index(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    Ok(cached_html(
+        headers,
+        state.tags_index_html.clone(),
+        state.tags_index_etag.clone(),
+    ))
+}
+
+async fn tag(
+    State(state): State<AppState>,
+    AxumPath(tag): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let (html, etag) = state
+        .tag_pages
+        .get(&tag)
+        .cloned()
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(cached_html(headers, html, etag))
+}
+
+/// Collect the sorted set of tags with per-tag post counts.
+fn collect_tags(posts: &[posts::Post]) -> Vec<(String, usize)> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for p in posts {
+        for t in &p.tags {
+            *counts.entry(t).or_default() += 1;
+        }
+    }
+    let mut tags: Vec<(String, usize)> = counts
+        .into_iter()
+        .map(|(t, n)| (t.to_string(), n))
+        .collect();
+    tags.sort_by(|a, b| a.0.cmp(&b.0));
+    tags
 }
 
 #[derive(Deserialize)]

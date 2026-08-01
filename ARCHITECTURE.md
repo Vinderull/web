@@ -43,7 +43,7 @@ truth. Posts are read **once at startup**, never at request time.
 `load_all(dir)` walks `dir/posts`, and for each `.md` file:
 1. `split_frontmatter` — splits on `+++` markers (lenient: unclosed/empty
    blocks fall back to raw content).
-2. `toml::from_str` → `FrontMatter { title, date, description }`.
+2. `toml::from_str` → `FrontMatter { title, date, description, tags }`.
 3. `render_markdown` — `pulldown-cmark` with tables, footnotes, strikethrough,
    task lists enabled; output is HTML strings. In the same parse pass it
    collects headings, slugifies them into stable `id` anchors (deduped on
@@ -51,7 +51,7 @@ truth. Posts are read **once at startup**, never at request time.
    a nested **table of contents** (`h2+` only; `h1` is the post title). No
    syntax-highlighting pass.
 4. `format_date` — `YYYY-MM-DD` → `"[month repr:long] [day], [year]"` via the
-   `time` crate.
+   `time` crate. `tags` is a flat `Vec<String>` (default empty).
 
 Result: `Vec<Post>` sorted by date **descending**, each `Post` carrying its
 slug, title, display date, optional description, pre-rendered body HTML, and
@@ -67,8 +67,11 @@ parsing):
   and a search field that `hx-get`s `/search`, swapping the list in place.
 - `post.html` — extends `base`, renders one post's pre-baked HTML via
   `{{ post.html|safe }}`, a precomputed `{{ post.toc|safe }}` nav (empty posts
-  omit it), and an optional `<meta description>` in the `head` block.
-
+  omit it), an optional `<meta description>` in the `head` block, and flat
+  `tags` rendered as links to `/tags/{tag}`.
+- `tags.html` / `tag.html` — extends `base`; the former lists every tag (with
+  post counts) linking to `/tags/{tag}`, the latter lists the posts for one tag.
+  Both are pre-rendered at boot like the index.
 Rust sides (`src/templates.rs`): `IndexTemplate<'a> { posts: &'a [Post] }` and
 `PostTemplate<'a> { post: &'a Post }` — they borrow the in-memory `Post`s.
 
@@ -79,6 +82,8 @@ A `Router` with shared `AppState { posts: Arc<Vec<Post>> }`:
 | `GET /` | `index` | rendered `index.html` (`Html<String>`) |
 | `GET /posts/{slug}` | `post` | rendered `post.html`; O(n) search → `404` if miss |
 | `GET /search` | `search` | htmx fragment `<ul id="post-list">`; scans in-memory posts, `no-store` |
+| `GET /tags` | `tags_index` | rendered `tags.html` (all tags + counts, cached) |
+| `GET /tags/{tag}` | `tag` | rendered `tag.html`; lookup → `404` if unknown |
 | `GET /healthz` | inline | `"ok"` as `text/plain` (Caddy health gate) |
 | `GET /static/*` | `ServeDir` | files streamed from `static/` (tower-http `fs`) |
 

@@ -13,6 +13,7 @@ pub struct Post {
     pub date: String,
     pub date_display: String,
     pub description: Option<String>,
+    pub tags: Vec<String>,
     pub html: String,
     pub toc: String,
 }
@@ -23,6 +24,8 @@ struct FrontMatter {
     date: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
@@ -72,6 +75,7 @@ fn parse_post(slug: &str, content: &str) -> Result<Post> {
         date: fm.date,
         date_display,
         description: fm.description,
+        tags: fm.tags,
         html,
         toc,
     })
@@ -303,6 +307,7 @@ mod tests {
         assert_eq!(post.title, "Test Post");
         assert_eq!(post.date, "2024-01-15");
         assert_eq!(post.description, Some("A test".to_string()));
+        assert_eq!(post.tags, Vec::<String>::new(), "no tags means empty list");
         assert!(post.html.contains("<strong>world</strong>"));
         assert!(post.date_display.contains("January"));
     }
@@ -348,6 +353,14 @@ mod tests {
     fn test_parse_post_missing_date() {
         let input = "+++\ntitle = \"T\"\n+++\nbody";
         assert!(parse_post("s", input).is_err());
+    }
+
+    #[test]
+    fn test_parse_post_tags() {
+        let input =
+            "+++\ntitle = \"T\"\ndate = \"2024-01-15\"\ntags = [\"rust\", \"web\"]\n+++\nbody";
+        let post = parse_post("s", input).unwrap();
+        assert_eq!(post.tags, vec!["rust", "web"]);
     }
 
     #[test]

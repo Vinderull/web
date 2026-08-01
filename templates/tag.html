@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}#{{ tag }} - My Blog{% endblock %}
+
+{% block content %}
+<h2>#{{ tag }}</h2>
+{% if posts.is_empty() %}
+<p>No posts with this tag.</p>
+{% else %}
+<ul class="post-list">
+{% for post in posts %}
+    <li>
+        <a href="/posts/{{ post.slug }}">
+            <span class="post-title">{{ post.title }}</span>
+            <time class="post-date">{{ post.date_display }}</time>
+        </a>
+    </li>
+{% endfor %}
+</ul>
+{% endif %}
+<p><a href="/tags">&larr; All tags</a></p>
+{% endblock %}

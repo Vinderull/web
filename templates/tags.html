@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Tags - My Blog{% endblock %}
+
+{% block content %}
+<h2>Tags</h2>
+{% if tags.is_empty() %}
+<p>No tags yet.</p>
+{% else %}
+<ul class="tag-list">
+{% for (tag, count) in tags %}
+    <li><a href="/tags/{{ tag }}">{{ tag }}</a> <span class="tag-count">({{ count }})</span></li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}
