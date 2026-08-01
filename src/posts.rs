@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
 use serde::Deserialize;
 use time::macros::format_description;
 
@@ -131,54 +132,59 @@ fn render_markdown(markdown: &str) -> (String, String) {
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let events: Vec<Event<'_>> = Parser::new_ext(markdown, options).collect();
-
+    let mut parser = Parser::new_ext(markdown, options);
     let mut used = HashSet::new();
     let mut headings: Vec<(u32, String, String)> = Vec::new();
     let mut out = Vec::new();
-    let mut i = 0;
-    while i < events.len() {
-        let (level, text, end) = match &events[i] {
+
+    while let Some(ev) = parser.next() {
+        match ev {
             Event::Start(Tag::Heading { level, .. }) => {
-                // Gather everything up to this heading's matching End.
-                let mut nested = 0usize;
-                let mut inner = Vec::new();
-                let mut j = i + 1;
-                loop {
-                    match events[j] {
-                        Event::Start(Tag::Heading { .. }) => nested += 1,
-                        Event::End(TagEnd::Heading(_)) if nested == 0 => break,
-                        Event::End(TagEnd::Heading(_)) => nested -= 1,
-                        _ => {}
-                    }
-                    inner.push(events[j].clone());
-                    j += 1;
-                }
+                // Everything up to this heading's matching End is its content.
+                let inner: Vec<_> = parser
+                    .by_ref()
+                    .take_while(|e| !matches!(e, Event::End(TagEnd::Heading(_))))
+                    .collect();
                 let mut text = String::new();
                 for e in &inner {
                     if let Event::Text(t) | Event::Code(t) = e {
                         text.push_str(t);
                     }
                 }
-                (*level as u32, text, j)
+                let id = unique_slug(&text, &mut used);
+                out.push(Event::Start(Tag::Heading {
+                    level,
+                    id: Some(id.clone().into()),
+                    classes: Vec::new(),
+                    attrs: Vec::new(),
+                }));
+                out.extend(inner);
+                out.push(Event::End(TagEnd::Heading(level)));
+                headings.push((level as u32, id, text));
             }
-            _ => {
-                out.push(events[i].clone());
-                i += 1;
-                continue;
+            Event::Start(Tag::CodeBlock(kind)) => {
+                // Collect the fenced/indented code text and replace the block
+                // with syntax-highlighted HTML in this same pass.
+                let lang = match kind {
+                    CodeBlockKind::Fenced(info) => {
+                        info.split_whitespace().next().unwrap_or("").to_string()
+                    }
+                    CodeBlockKind::Indented => String::new(),
+                };
+                // Markdown can't nest code blocks: exactly one Text run (plus
+                // the matching End) sits between Start and End.
+                let mut code = String::new();
+                for ev in parser.by_ref() {
+                    match ev {
+                        Event::Text(t) => code.push_str(&t),
+                        Event::End(TagEnd::CodeBlock) => break,
+                        _ => {}
+                    }
+                }
+                out.push(Event::Html(highlight_code(&lang, &code).into()));
             }
-        };
-
-        let id = unique_slug(&text, &mut used);
-        let mut start = events[i].clone();
-        if let Event::Start(Tag::Heading { id: slot, .. }) = &mut start {
-            *slot = Some(id.clone().into());
+            other => out.push(other),
         }
-        out.push(start);
-        out.extend(events[i + 1..end].iter().cloned());
-        out.push(events[end].clone());
-        headings.push((level, id, text));
-        i = end + 1;
     }
 
     let mut raw_html = String::new();
@@ -187,11 +193,57 @@ fn render_markdown(markdown: &str) -> (String, String) {
     let mut cleaner = ammonia::Builder::new();
     cleaner
         .add_tags(&["input"])
-        .add_generic_attributes(&["id"])
+        .add_generic_attributes(&["id", "class"])
         .add_tag_attributes("input", &["type", "checked", "disabled"]);
     let body = cleaner.clean(&raw_html).to_string();
 
     (body, build_toc(&headings))
+}
+
+/// Highlight a fenced code block to classed HTML (`tok-*` spans). Colors come
+/// from the static stylesheet, not inline styles, so the `style-src 'self'`
+/// CSP stays intact. Wraps the result in `<pre><code>`. Unknown/no language
+/// falls back to Syntect's plain-text syntax (still HTML-escaped).
+fn highlight_code(lang: &str, code: &str) -> String {
+    use syntect::html::{ClassStyle, ClassedHTMLGenerator};
+    use syntect::parsing::SyntaxSet;
+    use syntect::util::LinesWithEndings;
+
+    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
+    let ss = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
+
+    let syntax = ss
+        .find_syntax_by_token(lang)
+        .or_else(|| ss.find_syntax_by_extension(lang))
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
+    let mut generator = ClassedHTMLGenerator::new_with_class_style(
+        syntax,
+        ss,
+        ClassStyle::SpacedPrefixed { prefix: "tok-" },
+    );
+    for line in LinesWithEndings::from(code) {
+        if let Err(err) = generator.parse_html_for_line_which_includes_newline(line) {
+            tracing::debug!(?err, lang, "syntect failed; rendering code uncolored");
+            return format!("<pre><code>{}</code></pre>", escape_html(code));
+        }
+    }
+    format!("<pre><code>{}</code></pre>", generator.finalize())
+}
+
+/// Escape `&`, `<`, `>` — used only for the syntect-failure fallback. Syntect
+/// itself escapes code on the happy path.
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Turn heading text into a URL-safe, lowercase anchor id.
@@ -437,6 +489,26 @@ mod tests {
         let (html, _) = render_markdown("```\nlet x = 1;\n```");
         assert!(html.contains("<code>"));
         assert!(html.contains("let x = 1;"));
+    }
+
+    #[test]
+    fn test_render_markdown_highlights_fenced_rust() {
+        let (html, _) = render_markdown("```rust\nfn main() { let x = 1; }\n```");
+        // A recognized token (e.g. `fn`) gets a syntect class, not inline style.
+        assert!(
+            html.contains("class=\"tok-"),
+            "expected classed spans: {html}"
+        );
+        assert!(!html.contains("style=\""), "no inline styles (CSP): {html}");
+        assert!(html.contains("<pre><code>"));
+    }
+
+    #[test]
+    fn test_render_markdown_escaping_and_unknown_lang() {
+        // Unknown language falls back to plain text but must stay escaped.
+        let (html, _) = render_markdown("```nope\n<a & b>\n```");
+        assert!(!html.contains("<a &"), "code must be escaped: {html}");
+        assert!(html.contains("&lt;a"));
     }
 
     #[test]
