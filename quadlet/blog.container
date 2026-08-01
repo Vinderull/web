@@ -15,8 +15,8 @@ User=65532:65532
 ReadOnly=true
 DropCapability=all
 NoNewPrivileges=true
-# ponytail: static binary never forks/climbs; loosen on a multi-app host.
-PodmanArgs=--memory=512m --cpus=1 --pids-limit=100 --ulimit nofile=1024:1024
+# ponytail: static binary never forks/climbs; tighten further on a single-app host.
+PodmanArgs=--memory=256m --cpus=1 --pids-limit=100 --ulimit nofile=1024:1024
 
 [Service]
 # Compose `restart: unless-stopped` ≈ systemd Restart=always
