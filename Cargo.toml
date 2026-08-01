@@ -4,22 +4,26 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.8"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "signal"] }
-tower-http = { version = "0.7", features = ["fs", "trace"] }
-askama = "0.16"
-pulldown-cmark = "0.13"
+# axum: default pulls form/json/matched-path/original-uri/tower-log/tracing;
+# we only use the HTTP1 server, the Query extractor, and tokio-backed serve.
+axum = { version = "0.8", default-features = false, features = ["http1", "query", "tokio"] }
+tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower-http = { version = "0.7", default-features = false, features = ["fs", "trace"] }
+askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde = { version = "1.0", features = ["derive"] }
-toml = "1.1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# toml: only parsing frontmatter; "display" (serialization) is unused.
+toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
 anyhow = "1.0"
-time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
-ammonia = "4.0"
+time = { version = "0.3", default-features = false, features = ["formatting", "parsing", "macros"] }
+# ammonia: default pulls "uluru" (auto-link rel detection) which we don't use.
+ammonia = { version = "4.0", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
 http-body-util = "0.1"
