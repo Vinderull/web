@@ -23,6 +23,10 @@ ammonia = { version = "4.0", default-features = false }
 # syntect: syntax highlighting rendered to classed HTML at load time. Pure-Rust
 # (fancy-regex) so the distroless/musl build stays portable; no oniguruma C dep.
 syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
+# xxhash-rust: deterministic xxh3 for ETag generation. Stable across builds and
+# restarts (unlike DefaultHasher) so cached clients keep getting 304s across
+# deploys. no_std, zero transitive deps.
+xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"

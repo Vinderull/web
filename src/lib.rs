@@ -4,7 +4,6 @@ pub mod sandbox;
 mod templates;
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -300,14 +299,14 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
     resp
 }
 
-/// Deterministic-ish ETag for a rendered body.
-// ponytail: DefaultHasher is not stable across Rust versions; the ETag only
-// needs consistency within a deployment. Swap for a fixed algorithm (fnv /
-// xxhash) if cross-version or cross-instance ETag reuse matters.
+/// Stable ETag for a rendered body.
+///
+/// xxh3 is deterministic across processes and Rust versions, so the same
+/// content yields the same ETag on every boot — a client that cached a page
+/// before a deploy keeps getting a 304 instead of a full re-download.
 fn etag_for(s: &[u8]) -> HeaderValue {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    s.hash(&mut h);
-    HeaderValue::from_str(&format!("\"{:x}\"", h.finish())).unwrap()
+    let digest = xxhash_rust::xxh3::xxh3_64(s);
+    HeaderValue::from_str(&format!("\"{digest:x}\"")).unwrap()
 }
 
 #[cfg(test)]
@@ -397,6 +396,14 @@ mod tests {
     fn etag_stable_for_same_input() {
         assert_eq!(etag_for(b"hello"), etag_for(b"hello"));
         assert_ne!(etag_for(b"hello"), etag_for(b"world"));
+    }
+
+    #[test]
+    fn etag_is_a_fixed_golden_digest() {
+        // Pins the exact xxh3 digest so cross-process/cross-version stability
+        // is caught here rather than silently drifting. If the hasher or its
+        // parameters ever change, this test fails loudly.
+        assert_eq!(etag_for(b"hello").to_str().unwrap(), "\"9555e8555c62dcfd\"");
     }
 
     // The post route is now a pure lookup against pre-rendered pages; this
