@@ -6,7 +6,7 @@ RequiresMountsFor=/etc/web/Caddyfile
 # Pod= auto-generates Requires=/After= on web-pod.service.
 
 [Container]
-Image=docker.io/caddy:2.11.4-alpine
+Image=docker.io/caddy:2.11-alpine
 ContainerName=caddy
 Pod=web.pod
 ReadOnly=true
