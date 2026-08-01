@@ -20,6 +20,9 @@ anyhow = "1.0"
 time = { version = "0.3", default-features = false, features = ["formatting", "parsing", "macros"] }
 # ammonia: default pulls "uluru" (auto-link rel detection) which we don't use.
 ammonia = { version = "4.0", default-features = false }
+# syntect: syntax highlighting rendered to classed HTML at load time. Pure-Rust
+# (fancy-regex) so the distroless/musl build stays portable; no oniguruma C dep.
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"

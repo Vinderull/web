@@ -48,8 +48,11 @@ truth. Posts are read **once at startup**, never at request time.
    task lists enabled; output is HTML strings. In the same parse pass it
    collects headings, slugifies them into stable `id` anchors (deduped on
    collision), writes those ids back onto the `<h1>`–`<h6>` tags, and produces
-   a nested **table of contents** (`h2+` only; `h1` is the post title). No
-   syntax-highlighting pass.
+   a nested **table of contents** (`h2+` only; `h1` is the post title). Fenced
+   code blocks are syntax-highlighted in the same pass with `syntect`
+   (`ClassedHTMLGenerator`, `tok-*` classes — not inline styles, so the
+   `style-src 'self'` CSP holds); colors come from the generated theme CSS in
+   `static/css/main.css`.
 4. `format_date` — `YYYY-MM-DD` → `"[month repr:long] [day], [year]"` via the
    `time` crate. `tags` is a flat `Vec<String>` (default empty).
 
