@@ -14,7 +14,7 @@ mod linux {
     };
 
     pub fn apply(static_dir: &Path) -> Result<()> {
-        let abi = ABI::V1;
+        let abi = ABI::V9;
         let access_all = AccessFs::from_all(abi);
         let access_read = AccessFs::from_read(abi);
 
