@@ -7,14 +7,46 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 use web::{build_app, posts};
 
-/// Wire up the real app against the repo's content/ and static/ dirs.
+/// A small fixed corpus so the tests don't depend on repo content/ posts.
+fn test_corpus() -> Vec<posts::Post> {
+    vec![
+        posts::Post {
+            slug: "hello-world".into(),
+            title: "Hello World".into(),
+            date: "2026-01-01".into(),
+            date_display: "January 1, 2026".into(),
+            description: Some("A first post".into()),
+            tags: vec!["web".into()],
+            // "cambodian" appears only here, isolating this post.
+            html: "<p>about cambodian vodka and htmx</p>".into(),
+            toc: String::new(),
+            reading_time: 2,
+        },
+        posts::Post {
+            slug: "second-post".into(),
+            title: "Second Post".into(),
+            date: "2026-01-02".into(),
+            date_display: "January 2, 2026".into(),
+            description: Some("all about rust and axum".into()),
+            tags: vec!["rust".into()],
+            html: "<p>all about rust and axum</p>".into(),
+            toc: "<ul><li>Intro</li></ul>".into(),
+            reading_time: 3,
+        },
+    ]
+}
+
+fn test_about() -> posts::Page {
+    posts::Page {
+        slug: "about".into(),
+        title: "About".into(),
+        html: "<p>Colophon goes here.</p>".into(),
+    }
+}
+
+/// Wire up the app against the fixed synthetic corpus.
 fn app() -> Router {
-    let posts = posts::load_all(Path::new("content")).expect("load posts");
-    let about = posts::load_pages(Path::new("content"))
-        .unwrap()
-        .into_iter()
-        .find(|p| p.slug == "about");
-    build_app(posts, about, Path::new("static")).expect("build app")
+    build_app(test_corpus(), Some(test_about()), Path::new("static")).expect("build app")
 }
 
 /// Drive a request through the router in-process (no TCP socket) and return
@@ -63,10 +95,10 @@ async fn index_304_on_matching_etag() {
 
 #[tokio::test]
 async fn post_page_200_for_known_slug() {
-    let posts = posts::load_all(Path::new("content")).expect("load posts");
+    let posts = test_corpus();
     let slug = match posts.first() {
         Some(p) => &p.slug,
-        None => return, // no content to test against
+        None => return, // empty corpus
     };
     let (status, headers, body) = req(app(), "GET", &format!("/posts/{slug}"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -76,7 +108,7 @@ async fn post_page_200_for_known_slug() {
         body.contains("<article>"),
         "post should render article wrapper"
     );
-    // hello-world.md has h2 headings, so the precomputed ToC nav should render.
+    // The "second-post" fixture has a ToC, so the precomputed nav should render.
     if posts.iter().any(|p| p.slug == *slug && !p.toc.is_empty()) {
         assert!(
             body.contains("Table of Contents") && body.contains("class=\"toc\""),
@@ -131,7 +163,7 @@ async fn index_sets_security_headers() {
 
 #[tokio::test]
 async fn post_page_304_on_matching_etag() {
-    let posts = posts::load_all(Path::new("content")).expect("load posts");
+    let posts = test_corpus();
     let slug = match posts.first() {
         Some(p) => &p.slug,
         None => return,
@@ -146,9 +178,26 @@ async fn post_page_304_on_matching_etag() {
     assert!(body.is_empty());
 }
 
+// "cambodian" appears only in the "hello-world" fixture's body, isolating it.
+const QUERY: &str = "/search?q=cambodian";
+
+async fn search_req(hx: bool, uri: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if hx {
+        builder = builder.header("HX-Request", "true");
+    }
+    let resp = app()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let (parts, body) = resp.into_parts();
+    let bytes = body.collect().await.unwrap().to_bytes();
+    (parts.status, parts.headers, bytes.to_vec())
+}
+
 #[tokio::test]
-async fn search_returns_matching_posts() {
-    let (status, headers, body) = req(app(), "GET", "/search?q=hello", None).await;
+async fn search_returns_fragment_for_htmx() {
+    let (status, headers, body) = search_req(true, QUERY).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
@@ -156,10 +205,30 @@ async fn search_returns_matching_posts() {
         "search responses must not be cached"
     );
     let body = String::from_utf8(body).unwrap();
-    assert!(body.contains("<ul"), "should render a list fragment");
+    assert!(!body.contains("<html"), "htmx should get a bare fragment");
     assert!(
         body.contains("/posts/hello-world"),
-        "should include the matching post"
+        "should include the match"
+    );
+}
+
+#[tokio::test]
+async fn search_returns_full_document_for_plain_navigation() {
+    let (status, _, body) = search_req(false, QUERY).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(body).unwrap();
+    assert!(
+        body.contains("<!DOCTYPE html>"),
+        "plain navigation should be a full document (Lynx/curl/JS-off)"
+    );
+    assert!(
+        body.contains("/posts/hello-world"),
+        "should include the match"
+    );
+    // Only the matching post, not the full corpus.
+    assert!(
+        !body.contains("/posts/second-post"),
+        "should filter results"
     );
 }
 
@@ -187,9 +256,9 @@ async fn search_sets_security_headers() {
 
 #[tokio::test]
 async fn search_with_empty_query_returns_all_posts() {
-    let posts = posts::load_all(Path::new("content")).unwrap();
+    let posts = test_corpus();
     if posts.is_empty() {
-        return; // no content to test against
+        return; // empty corpus
     }
     let (status, _, body) = req(app(), "GET", "/search?q=", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -216,7 +285,7 @@ async fn search_with_no_match_returns_empty_state() {
 
 #[tokio::test]
 async fn tags_index_lists_all_tags() {
-    let posts = posts::load_all(Path::new("content")).unwrap();
+    let posts = test_corpus();
     let tags: Vec<String> = {
         let mut set = std::collections::BTreeSet::new();
         for p in &posts {
@@ -237,10 +306,10 @@ async fn tags_index_lists_all_tags() {
 
 #[tokio::test]
 async fn tag_page_lists_posts_for_tag() {
-    let posts = posts::load_all(Path::new("content")).unwrap();
+    let posts = test_corpus();
     let tag = match posts.iter().flat_map(|p| &p.tags).next() {
         Some(t) => t.clone(),
-        None => return, // no tagged content to test against
+        None => return, // no tagged content
     };
     let (status, headers, body) = req(app(), "GET", &format!("/tags/{tag}"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -267,7 +336,7 @@ async fn tag_page_404_for_unknown_tag() {
 
 #[tokio::test]
 async fn post_page_shows_tags() {
-    let posts = posts::load_all(Path::new("content")).unwrap();
+    let posts = test_corpus();
     let post = match posts.iter().find(|p| !p.tags.is_empty()) {
         Some(p) => p,
         None => return, // no tagged content
