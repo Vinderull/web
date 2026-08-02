@@ -123,6 +123,14 @@ podman run --rm -p 127.0.0.1:3000:3000 localhost/blog:latest
 # Server starts on http://127.0.0.1:3000 (plain HTTP, no TLS)
 ```
 
+For local testing the [`build-run.sh`](build-run.sh) helper does both of those
+steps in one shot — it builds the `runtime` image (as `localhost/blog:latest`)
+and runs it loopback-only on `127.0.0.1:3000`:
+
+```bash
+./build-run.sh
+```
+
 ## Configuration
 
 | Env var      | Default       | Description               |
