@@ -164,6 +164,28 @@ async fn search_returns_matching_posts() {
 }
 
 #[tokio::test]
+async fn search_sets_security_headers() {
+    let (_, headers, _) = req(app(), "GET", "/search?q=hello", None).await;
+    assert_eq!(
+        headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+        "nosniff"
+    );
+    assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+    assert_eq!(
+        headers.get(header::REFERRER_POLICY).unwrap(),
+        "strict-origin-when-cross-origin"
+    );
+    assert_eq!(
+        headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
+        "default-src 'self'; style-src 'self'; script-src 'self'"
+    );
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
+}
+
+#[tokio::test]
 async fn search_with_empty_query_returns_all_posts() {
     let posts = posts::load_all(Path::new("content")).unwrap();
     if posts.is_empty() {
