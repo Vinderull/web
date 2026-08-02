@@ -69,8 +69,10 @@ pub fn build_app(
     static_dir: &Path,
 ) -> anyhow::Result<Router> {
     let posts = Arc::new(posts);
+    let all_posts: Vec<&posts::Post> = posts.iter().collect();
     let index_html = IndexTemplate {
-        posts: posts.as_slice(),
+        posts: &all_posts,
+        query: "",
     }
     .render()
     .context("rendering index template")?;
@@ -273,19 +275,40 @@ struct SearchQuery {
 /// the per-request allocation cost of lowercasing/matching.
 const MAX_QUERY_LEN: usize = 200;
 
-/// Server-side search over the in-memory posts. Returns an HTML fragment
-/// (a `<ul id="post-list">`) that htmx swaps in place of the index's list.
+/// Server-side search over the in-memory posts.
+///
+/// htmx requests (detected via the `HX-Request: true` header) get the bare
+/// `<ul id="post-list">` fragment to swap into the index's list. A plain
+/// navigation — Lynx, curl, JS disabled — gets a full document (the index
+/// template re-rendered with the filtered posts) so search works with no JS.
+///
 /// The body is deliberately not cached so re-searching always sees fresh
 /// results.
-async fn search(State(state): State<AppState>, Query(params): Query<SearchQuery>) -> Response {
+async fn search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<SearchQuery>,
+) -> Response {
     let query = params.q.unwrap_or_default();
     let results = search_posts(&state.posts, &state.search_haystacks, &query);
-    let body = SearchResultsTemplate {
-        posts: &results,
-        query: &query,
-    }
-    .render()
-    .unwrap_or_default();
+    let is_htmx = headers
+        .get(header::HeaderName::from_static("hx-request"))
+        .is_some_and(|v| v == "true");
+    let body = if is_htmx {
+        SearchResultsTemplate {
+            posts: &results,
+            query: &query,
+        }
+        .render()
+        .unwrap_or_default()
+    } else {
+        IndexTemplate {
+            posts: &results,
+            query: &query,
+        }
+        .render()
+        .unwrap_or_default()
+    };
     let mut resp = Response::new(Body::from(body));
     resp.headers_mut().insert(
         header::CONTENT_TYPE,

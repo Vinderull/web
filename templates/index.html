@@ -4,11 +4,15 @@
 
 {% block content %}
 <h2>Posts</h2>
-<form class="search" role="search" hx-get="/search" hx-trigger="input changed delay:300ms, search" hx-target="#post-list" hx-swap="outerHTML">
-    <input type="search" name="q" placeholder="Search posts…" aria-label="Search posts" autocomplete="off">
+<form class="search" role="search" action="/search" method="get" hx-get="/search" hx-trigger="input changed delay:300ms, search" hx-target="#post-list" hx-swap="outerHTML">
+    <input type="search" name="q" placeholder="Search posts…" aria-label="Search posts" autocomplete="off" value="{{ query }}">
 </form>
 {% if posts.is_empty() %}
+{% if query.is_empty() %}
 <p>No posts yet.</p>
+{% else %}
+<p>No posts match "{{ query }}".</p>
+{% endif %}
 {% else %}
 <ul class="post-list" id="post-list">
 {% for post in posts %}

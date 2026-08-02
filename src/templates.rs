@@ -9,7 +9,9 @@ pub struct NotFoundTemplate;
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct IndexTemplate<'a> {
-    pub posts: &'a [Post],
+    pub posts: &'a [&'a Post],
+    /// Current search query (empty on the plain index).
+    pub query: &'a str,
 }
 
 #[derive(Template)]
