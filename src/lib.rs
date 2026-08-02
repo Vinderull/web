@@ -49,6 +49,12 @@ struct AppState {
     about_page: Option<(Bytes, HeaderValue)>,
     // Pre-rendered 404 page, served on any unknown path or unknown slug/tag.
     not_found_html: Bytes,
+    // Per-post lowercased search haystack, index-aligned with `posts`. Built
+    // once at boot so every lookup during a search avoids re-lowercasing the
+    // whole corpus per keystroke.
+    // ponytail: linear scan over the corpus per request; fine while posts fit
+    // in RAM, an inverted index would replace this at corpus scale.
+    search_haystacks: Arc<Vec<String>>,
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
@@ -93,6 +99,11 @@ pub fn build_app(
         post_pages.insert(p.slug.clone(), (Bytes::from(html), etag));
     }
     let post_pages = Arc::new(post_pages);
+
+    // Precompute a lowercased search haystack per post, index-aligned with
+    // `posts`, so search never re-allocates or re-lowercases the corpus on the
+    // request path.
+    let search_haystacks = Arc::new(build_haystacks(posts_slice));
 
     // Pre-render the tag index and one page per tag (sorted alphabetically).
     let tags = collect_tags(&posts);
@@ -139,6 +150,7 @@ pub fn build_app(
         tag_pages,
         about_page,
         not_found_html,
+        search_haystacks,
     };
 
     Ok(Router::new()
@@ -256,13 +268,18 @@ struct SearchQuery {
     q: Option<String>,
 }
 
+/// Upper bound on accepted query characters. Truncation (not rejection) keeps
+/// a too-long `q` harmless while still returning useful results and bounding
+/// the per-request allocation cost of lowercasing/matching.
+const MAX_QUERY_LEN: usize = 200;
+
 /// Server-side search over the in-memory posts. Returns an HTML fragment
 /// (a `<ul id="post-list">`) that htmx swaps in place of the index's list.
 /// The body is deliberately not cached so re-searching always sees fresh
 /// results.
 async fn search(State(state): State<AppState>, Query(params): Query<SearchQuery>) -> Response {
     let query = params.q.unwrap_or_default();
-    let results = search_posts(&state.posts, &query);
+    let results = search_posts(&state.posts, &state.search_haystacks, &query);
     let body = SearchResultsTemplate {
         posts: &results,
         query: &query,
@@ -276,25 +293,51 @@ async fn search(State(state): State<AppState>, Query(params): Query<SearchQuery>
     );
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    apply_security_headers(&mut resp);
     resp
 }
 
-/// Case-insensitive substring match on title, description, or body. A blank
-/// query returns every post (so clearing the box restores the full list).
-fn search_posts<'a>(posts: &'a [posts::Post], query: &str) -> Vec<&'a posts::Post> {
-    let q = query.trim().to_lowercase();
+/// Build the per-post lowercased search haystack (title + description + body),
+/// index-aligned with `posts`. Built once at boot and reused for every search.
+fn build_haystacks(posts: &[posts::Post]) -> Vec<String> {
+    posts
+        .iter()
+        .map(|p| {
+            let mut h = p.title.to_lowercase();
+            if let Some(d) = &p.description {
+                h.push('\n');
+                h.push_str(&d.to_lowercase());
+            }
+            h.push('\n');
+            h.push_str(&p.html.to_lowercase());
+            h
+        })
+        .collect()
+}
+
+/// Case-insensitive substring match on the pre-lowercased title/description/
+/// body haystack. `haystacks` is index-aligned with `posts` and built once at
+/// boot. A blank query returns every post (so clearing the box restores the
+/// full list). Queries are trimmed and length-capped.
+fn search_posts<'a>(
+    posts: &'a [posts::Post],
+    haystacks: &[String],
+    query: &str,
+) -> Vec<&'a posts::Post> {
+    let q = query
+        .chars()
+        .take(MAX_QUERY_LEN)
+        .collect::<String>()
+        .trim()
+        .to_lowercase();
     if q.is_empty() {
         return posts.iter().collect();
     }
     posts
         .iter()
-        .filter(|p| {
-            p.title.to_lowercase().contains(&q)
-                || p.description
-                    .as_deref()
-                    .is_some_and(|d| d.to_lowercase().contains(&q))
-                || p.html.to_lowercase().contains(&q)
-        })
+        .zip(haystacks)
+        .filter(|(_, h)| h.contains(&q))
+        .map(|(p, _)| p)
         .collect()
 }
 
@@ -322,6 +365,15 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
+    apply_security_headers(&mut resp);
+    resp
+}
+
+/// Apply the hardening headers that are safe on every HTML response:
+/// MIME sniffing off, framing denied, a strict referrer policy, and the
+/// site's CSP (`style-src 'self'` is why highlighting uses classed spans).
+/// Shared by cached pages and the uncached `/search` fragment.
+fn apply_security_headers(resp: &mut Response) {
     resp.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -336,7 +388,6 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("default-src 'self'; style-src 'self'; script-src 'self'"),
     );
-    resp
 }
 
 /// Stable ETag for a rendered body.
@@ -563,18 +614,19 @@ mod tests {
         if posts.is_empty() {
             return;
         }
+        let haystacks = build_haystacks(&posts);
         // Every post must match an empty query.
-        assert_eq!(search_posts(&posts, "").len(), posts.len());
-        assert_eq!(search_posts(&posts, "   ").len(), posts.len());
+        assert_eq!(search_posts(&posts, &haystacks, "").len(), posts.len());
+        assert_eq!(search_posts(&posts, &haystacks, "   ").len(), posts.len());
 
         // A title match, including a case-insensitive variant.
-        let by_title = search_posts(&posts, &posts[0].title);
+        let by_title = search_posts(&posts, &haystacks, &posts[0].title);
         assert!(
             by_title.iter().any(|p| p.slug == posts[0].slug),
             "title should match its own post"
         );
         assert!(
-            search_posts(&posts, &posts[0].title.to_uppercase())
+            search_posts(&posts, &haystacks, &posts[0].title.to_uppercase())
                 .iter()
                 .any(|p| p.slug == posts[0].slug),
             "title match should be case-insensitive"
@@ -583,7 +635,7 @@ mod tests {
         // A description-only match.
         if let Some(desc) = &posts[0].description {
             assert!(
-                search_posts(&posts, desc)
+                search_posts(&posts, &haystacks, desc)
                     .iter()
                     .any(|p| p.slug == posts[0].slug),
                 "description should match its own post"
@@ -591,7 +643,41 @@ mod tests {
         }
 
         // A garbage query returns nothing.
-        assert!(search_posts(&posts, "qqqqzzzznope").is_empty());
+        assert!(search_posts(&posts, &haystacks, "qqqqzzzznope").is_empty());
+    }
+
+    #[test]
+    fn search_caps_oversized_query() {
+        let posts = vec![
+            posts::Post {
+                slug: "x".into(),
+                title: "abc".into(),
+                date: "2024-01-01".into(),
+                date_display: "January 1, 2024".into(),
+                description: None,
+                tags: Vec::new(),
+                html: "abc".into(),
+                toc: String::new(),
+                reading_time: 1,
+            },
+            fake_post("other"),
+        ];
+        let haystacks = build_haystacks(&posts);
+        // A short, real query matches the post whose haystack contains it.
+        assert!(
+            search_posts(&posts, &haystacks, "abc")
+                .iter()
+                .any(|p| p.slug == "x")
+        );
+        // An oversized query whose only meaningful token sits beyond the cap
+        // is truncated, so it no longer matches anything.
+        let oversized = format!("{}abc", "a".repeat(MAX_QUERY_LEN));
+        assert!(oversized.len() > MAX_QUERY_LEN);
+        assert_eq!(
+            search_posts(&posts, &haystacks, &oversized).len(),
+            0,
+            "after truncation to MAX_QUERY_LEN the tail 'abc' is dropped"
+        );
     }
 
     // Unknown paths and unknown slugs/tags all yield the custom 404 page.
