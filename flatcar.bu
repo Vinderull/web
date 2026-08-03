@@ -86,11 +86,11 @@ storage:
         inline: |
           blacklist usb-storage
     # disabe core user sudo access
-    - path: /etc/sudoers.d/core-passwd
-      mode: 0444
-      contents:
-        inline: |
-          core	ALL=(ALL) 	ALL
+    #- path: /etc/sudoers.d/core-passwd
+    #  mode: 0444
+    #  contents:
+    #    inline: |
+    #      core	ALL=(ALL) 	ALL
 
 systemd:
   units:
