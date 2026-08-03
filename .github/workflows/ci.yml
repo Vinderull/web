@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths-ignore:
       - "content/posts/**"
+      - "sshd_config"
+      - "Caddyfile"
+      - "flatcar.bu"
   release:
     types: [published]
 

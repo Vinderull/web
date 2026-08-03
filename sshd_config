@@ -24,3 +24,18 @@ Subsystem sftp  /usr/lib/ssh/sftp-server -f AUTHPRIV -l INFO
 # Using regular users in combination with /bin/su or /usr/bin/sudo ensure a clear audit track.
 PermitRootLogin No
 
+# Only the operator account may SSH in; all other local users are rejected.
+AllowUsers core
+
+# This box is single-purpose; forwarding is never needed. Disabling both
+# limits pivoting/agent theft if an account is ever compromised.
+AllowTcpForwarding no
+AllowAgentForwarding no
+
+# No DNS at connect time — avoids a blocking reverse lookup on every login.
+UseDNS no
+
+# Bound retries so a key-only box still sheds brute-force/slowloris noise.
+MaxAuthTries 3
+LoginGraceTime 30
+
