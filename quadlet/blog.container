@@ -1,7 +1,7 @@
 [Unit]
 Description=Blog
 # Pod= auto-generates Requires=/After= on web-pod.service.
-Before=caddy-container.service
+Before=caddy.service
 
 [Container]
 Image=ghcr.io/vinderull/web:latest

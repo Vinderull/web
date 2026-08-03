@@ -59,8 +59,8 @@ sudo systemctl start web-pod
 systemctl --user start web-pod
 ```
 
-Starting `web-pod` brings up the pod infra container; `caddy-container` and
-`blog-container` are pulled in via their `Pod=` + `Requires=`/`After=` ordering
+Starting `web-pod` brings up the pod infra container; `caddy` and
+`blog` are pulled in via their `Pod=` + `Requires=`/`After=` ordering
 (caddy waits for blog, blog waits for the pod).
 
 ## 4. Caddyfile target
@@ -69,7 +69,7 @@ localhost inside the shared pod namespace. Edit the domain to match yours;
 reload Caddy with:
 
 ```sh
-sudo systemctl restart caddy-container
+sudo systemctl restart caddy
 ```
 
 ## Notes / deviations from compose
@@ -78,7 +78,7 @@ sudo systemctl restart caddy-container
   keyless-signed with cosign) when you publish a GitHub Release (against a `v*`
   tag); `blog.container`
   pulls it via `Update=registry`, so a deploy is just
-  `systemctl restart blog-container`.
+  `systemctl restart blog`.
 - **`expose:`**: omitted — it's informational in compose; reachability comes from
   the shared pod localhost namespace.
 - **`depends_on`**: modeled with `Requires=`/`After=`/`Before=` ordering. Caddy
@@ -160,11 +160,11 @@ auto-update reboots. The blog image is pulled from GHCR on first start
 ```sh
 ssh user@vps
 sudo systemctl daemon-reload        # runs the quadlet generator
-sudo systemctl start web-pod        # pulls in blog-container + caddy-container;
-                                    # blog-container pulls ghcr.io/vinderull/web:latest
+sudo systemctl start web-pod        # pulls in blog + caddy;
+                                    # blog pulls ghcr.io/vinderull/web:latest
 sudo systemctl status web-pod
-journalctl -u blog-container -f     # watch the image pull + app boot
-journalctl -u caddy-container -f    # watch Caddy obtain the Let's Encrypt cert
+journalctl -u blog -f               # watch the image pull + app boot
+journalctl -u caddy -f              # watch Caddy obtain the Let's Encrypt cert
 ```
 
 > If the pull fails with `image not known` / `access denied`, confirm the GHCR
@@ -181,7 +181,7 @@ re-pulls the `:latest` tag on restart:
 # dev machine — publish a release (creates/pushes the tag + fires CI)
 gh release create v1.2.3 --generate-notes
 # vps (once CI's deploy job is green)
-sudo systemctl restart blog-container   # re-pulls ghcr.io/vinderull/web:latest
+sudo systemctl restart blog             # re-pulls ghcr.io/vinderull/web:latest
 ```
 
 To pin a specific release instead of floating on `:latest`, set the tag in
@@ -203,4 +203,4 @@ published by the CI `deploy` job alongside `:latest`), copy the unit to
   pulls and merges `flatcar-podman` at first boot. The extension is versioned
   to the OS and auto-updates with Flatcar releases.
 - **Caddyfile changes**: edit `/etc/web/Caddyfile` on the VPS, then
-  `sudo systemctl restart caddy-container`.
+  `sudo systemctl restart caddy`.

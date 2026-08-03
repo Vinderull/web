@@ -1,7 +1,7 @@
 [Unit]
 Description=Caddy reverse proxy (TLS terminator)
-After=blog-container.service
-Requires=blog-container.service
+After=blog.service
+Wants=blog.service
 RequiresMountsFor=/etc/web/Caddyfile
 # Pod= auto-generates Requires=/After= on web-pod.service.
 
