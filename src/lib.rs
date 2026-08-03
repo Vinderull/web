@@ -26,6 +26,10 @@ use templates::{
     TagTemplate, TagsIndexTemplate,
 };
 
+/// Site name shown in the header and every page title. Change it here to
+/// rename the site everywhere at once.
+pub const SITE_NAME: &str = "My Bloginorium";
+
 #[derive(Clone)]
 struct AppState {
     index_html: Bytes,
@@ -73,6 +77,7 @@ pub fn build_app(
     let index_html = IndexTemplate {
         posts: &all_posts,
         query: "",
+        site_name: SITE_NAME,
     }
     .render()
     .context("rendering index template")?;
@@ -80,9 +85,11 @@ pub fn build_app(
     let index_html = Bytes::from(index_html);
 
     let not_found_html = Bytes::from(
-        NotFoundTemplate
-            .render()
-            .context("rendering 404 template")?,
+        NotFoundTemplate {
+            site_name: SITE_NAME,
+        }
+        .render()
+        .context("rendering 404 template")?,
     );
 
     let mut post_pages = HashMap::with_capacity(posts.len());
@@ -94,6 +101,7 @@ pub fn build_app(
             post: p,
             newer,
             older,
+            site_name: SITE_NAME,
         }
         .render()
         .with_context(|| format!("rendering post {}", p.slug))?;
@@ -110,9 +118,12 @@ pub fn build_app(
     // Pre-render the tag index and one page per tag (sorted alphabetically).
     let tags = collect_tags(&posts);
     let tags_index_html = Bytes::from(
-        TagsIndexTemplate { tags: &tags }
-            .render()
-            .context("rendering tags index")?,
+        TagsIndexTemplate {
+            tags: &tags,
+            site_name: SITE_NAME,
+        }
+        .render()
+        .context("rendering tags index")?,
     );
     let tags_index_etag = etag_for(&tags_index_html);
     let mut tag_pages = HashMap::with_capacity(tags.len());
@@ -121,9 +132,13 @@ pub fn build_app(
             .iter()
             .filter(|p| p.tags.iter().any(|t| t == tag))
             .collect();
-        let html = TagTemplate { tag, posts: &list }
-            .render()
-            .with_context(|| format!("rendering tag {tag}"))?;
+        let html = TagTemplate {
+            tag,
+            posts: &list,
+            site_name: SITE_NAME,
+        }
+        .render()
+        .with_context(|| format!("rendering tag {tag}"))?;
         let etag = etag_for(html.as_bytes());
         tag_pages.insert(tag.clone(), (Bytes::from(html), etag));
     }
@@ -134,9 +149,12 @@ pub fn build_app(
     // Its absence is not an error — the `/about` route just 404s.
     let about_page = about_page
         .map(|page| {
-            let html = PageTemplate { page: &page }
-                .render()
-                .context("rendering about page")?;
+            let html = PageTemplate {
+                page: &page,
+                site_name: SITE_NAME,
+            }
+            .render()
+            .context("rendering about page")?;
             let etag = etag_for(html.as_bytes());
             Ok::<_, anyhow::Error>((Bytes::from(html), etag))
         })
@@ -305,6 +323,7 @@ async fn search(
         IndexTemplate {
             posts: &results,
             query: &query,
+            site_name: SITE_NAME,
         }
         .render()
         .unwrap_or_default()
@@ -533,6 +552,7 @@ mod tests {
                 post: p,
                 newer,
                 older,
+                site_name: SITE_NAME,
             }
             .render()
             .unwrap();

@@ -5,7 +5,7 @@ title = "About"
 ## Bio
 
 I work in the embedded field. I care most about hardware when it relates to software and I care most about software when it relates to hardware.
-I do Linux pretty much all day. Bluefin and the Universal Blue variants are my go to. I use OpenBSD when possible elsewhere (it is so nice to use).
+I do Linux pretty much all day. Bluefin and the Universal Blue variants are my go to. I use OpenBSD when possible elsewhere.
 
 I have been a guitar player for 20 years. Music is my life and has opened every door for me, including engineering. Without Music I would not be doing what I am doing.
 
