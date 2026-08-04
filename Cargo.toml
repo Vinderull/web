@@ -27,6 +27,8 @@ syntect = { version = "5.2", default-features = false, features = ["default-fanc
 # restarts (unlike DefaultHasher) so cached clients keep getting 304s across
 # deploys. no_std, zero transitive deps.
 xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
+# atom_syndication: Atom feed generation. Pre-rendered at boot like everything else.
+atom_syndication = "0.12"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
