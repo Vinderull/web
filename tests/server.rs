@@ -399,3 +399,58 @@ async fn teapot_returns_418_with_poem() {
     let body = String::from_utf8(body).unwrap();
     assert!(body.contains("I'm a little teapot"));
 }
+
+#[tokio::test]
+async fn feed_returns_atom_xml_with_correct_content_type() {
+    let (status, headers, body) = req(app(), "GET", "/feed.xml", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/atom+xml; charset=utf-8"
+    );
+    assert!(headers.contains_key(header::ETAG));
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "public, max-age=60, s-maxage=600"
+    );
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("<feed"), "should have feed root element");
+    assert!(body.contains("<entry>"), "should contain entries");
+    assert!(
+        body.contains("<title>Hello World</title>"),
+        "should contain post title"
+    );
+    assert!(
+        body.contains("<title>Second Post</title>"),
+        "should contain second post"
+    );
+    assert!(
+        body.contains(r#"type="html""#),
+        "full-content feed should use html content type"
+    );
+    assert!(
+        body.contains("about cambodian vodka"),
+        "full-content feed should include post body HTML"
+    );
+    assert!(
+        body.contains("<category"),
+        "feed entries should include tag categories"
+    );
+}
+
+#[tokio::test]
+async fn feed_redirect_to_feed_xml() {
+    let (status, headers, body) = req(app(), "GET", "/feed", None).await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(headers.get(header::LOCATION).unwrap(), "/feed.xml");
+    assert!(body.is_empty(), "redirect body should be empty");
+}
+
+#[tokio::test]
+async fn feed_304_on_matching_etag() {
+    let (_, headers, _) = req(app(), "GET", "/feed.xml", None).await;
+    let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
+    let (status, _, body) = req(app(), "GET", "/feed.xml", Some(etag)).await;
+    assert_eq!(status, StatusCode::NOT_MODIFIED);
+    assert!(body.is_empty(), "304 must have no body");
+}

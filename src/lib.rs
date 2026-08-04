@@ -1,4 +1,5 @@
 pub mod config;
+pub mod feed;
 pub mod posts;
 pub mod sandbox;
 mod templates;
@@ -13,7 +14,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::get,
 };
 use tower_http::services::ServeDir;
@@ -29,6 +30,10 @@ use templates::{
 /// Site name shown in the header and every page title. Change it here to
 /// rename the site everywhere at once.
 pub const SITE_NAME: &str = "My Bloginorium";
+
+/// Public URL of the site. Used for Atom feed absolute URIs. Change this
+/// to match your domain before deploying.
+pub const SITE_URL: &str = "https://bloginorium.com";
 
 #[derive(Clone)]
 struct AppState {
@@ -59,6 +64,10 @@ struct AppState {
     // ponytail: linear scan over the corpus per request; fine while posts fit
     // in RAM, an inverted index would replace this at corpus scale.
     search_haystacks: Arc<Vec<String>>,
+    // Pre-rendered Atom feed. Built once at boot, served from memory like
+    // every other page.
+    feed_xml: Bytes,
+    feed_etag: HeaderValue,
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
@@ -160,6 +169,15 @@ pub fn build_app(
         })
         .transpose()?;
 
+    // Pre-render the Atom feed from all posts. Rendered once at boot, served
+    // from memory like every other page.
+    let feed_xml = Bytes::from(
+        feed::build_feed(posts_slice)
+            .context("building Atom feed")?
+            .to_string(),
+    );
+    let feed_etag = etag_for(&feed_xml);
+
     let state = AppState {
         index_html,
         index_etag,
@@ -171,6 +189,8 @@ pub fn build_app(
         about_page,
         not_found_html,
         search_haystacks,
+        feed_xml,
+        feed_etag,
     };
 
     Ok(Router::new()
@@ -181,6 +201,8 @@ pub fn build_app(
         .route("/tags/{tag}", get(tag))
         .route("/about", get(about))
         .route("/teapot", get(teapot))
+        .route("/feed.xml", get(feed))
+        .route("/feed", get(|| async { Redirect::permanent("/feed.xml") }))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
@@ -225,6 +247,32 @@ async fn teapot() -> Response {
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
     (StatusCode::IM_A_TEAPOT, resp).into_response()
+}
+
+async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
+    let matched = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(|inm| {
+            inm.split(',')
+                .any(|t| t.trim() == state.feed_etag.to_str().unwrap_or(""))
+        })
+        .unwrap_or(false);
+    if matched {
+        return Ok(StatusCode::NOT_MODIFIED.into_response());
+    }
+    let mut resp = Response::new(Body::from(state.feed_xml.clone()));
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=60, s-maxage=600"),
+    );
+    resp.headers_mut()
+        .insert(header::ETAG, state.feed_etag.clone());
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/atom+xml; charset=utf-8"),
+    );
+    Ok(resp)
 }
 
 async fn tags_index(
