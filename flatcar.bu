@@ -96,6 +96,13 @@ systemd:
   units:
     - name: web-pod.service
       enabled: true
+    # Keep quadlet containers up to date: podman-auto-update.timer (ships with
+    # the flatcar-podman sysext) runs `podman auto-update` on a schedule.
+    # `Update=registry` in blog.container makes it pull the latest image, then
+    # systemd restarts the generated quadlet units. Enabling it here means no
+    # manual `sudo systemctl enable --now podman-auto-update.timer` on the box.
+    - name: podman-auto-update.timer
+      enabled: true
     # Restrict docker to just root
     - name: docker.socket
       dropins:
