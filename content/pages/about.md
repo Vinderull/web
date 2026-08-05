@@ -9,12 +9,12 @@ I do Linux pretty much all day. Bluefin and the Universal Blue variants are my g
 
 I have been a guitar player for 20 years. Music is my life and has opened every door for me, including engineering. Without Music I would not be doing what I am doing.
 
-When doing neither of those things I liftweights and read a lot of books.
+When doing neither of those things, I lift weights and read a lot of books.
 
 
 ## What I'm working on
 
-This web server. Learning songs, working on my cursive handwriting.
+This web server, learning songs, and working on my cursive handwriting.
 One day I will be able to run a 10 minute mile.
 
 ## Colophon
@@ -26,4 +26,4 @@ memory. Source is available under the MIT License.
 
 ## Contact
 
-Ways to reach me — [GitHub](https://github.com/Vinderull/web). Otherwise, I'll catch you on the flipside, friends.
+Reach me on [GitHub](https://github.com/Vinderull/web). Otherwise, I'll catch you on the flipside, friends.
