@@ -397,7 +397,8 @@ async fn teapot_returns_418_with_poem() {
         "text/plain; charset=utf-8"
     );
     let body = String::from_utf8(body).unwrap();
-    assert!(body.contains("I'm a little teapot"));
+    assert!(body.contains("short and stout"));
+    assert!(body.contains("pour me out"));
 }
 
 #[tokio::test]

@@ -240,7 +240,9 @@ async fn teapot() -> Response {
     // Easter egg. Short-circuits before any real route; deliberately no
     // caching/state so it stays zero-cost and invisible to real traffic.
     let mut resp = Response::new(Body::from(
-        "418 I'm a teapot\n\nI'm a little teapot, short and stout.\n\n         Here is my handle, here is my spout.\n         When I get all steamed up then I shout:\n         tip me over and pour me out!\n",
+        "418 I'm a teapot: \n \n
+            The requested entity body is short and stout.\n
+            Tip me over and pour me out.\n",
     ));
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
