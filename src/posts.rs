@@ -390,7 +390,11 @@ fn render_toc(arena: &[TocNode], idx: usize, out: &mut String) {
     out.push_str("<ul>");
     for &c in children {
         let child = &arena[c];
-        out.push_str(&format!("<li><a href=\"#{}\">{}</a>", child.id, child.text));
+        out.push_str(&format!(
+            "<li><a href=\"#{}\">{}</a>",
+            child.id,
+            escape_html(&child.text)
+        ));
         render_toc(arena, c, out);
         out.push_str("</li>");
     }
@@ -606,6 +610,19 @@ mod tests {
     fn test_render_markdown_toc_empty_when_no_headings() {
         let (_, toc) = render_markdown("just **text**, no headings");
         assert!(toc.is_empty());
+    }
+
+    #[test]
+    fn test_render_markdown_toc_escapes_heading_text() {
+        // Heading text is inserted into the ToC with `|safe` in the template,
+        // so it must be HTML-escaped at build time to prevent stored XSS from
+        // untrusted post content.
+        let (_html, toc) = render_markdown("## A & B");
+        assert!(toc.contains("A &amp; B"), "ToC text must be escaped: {toc}");
+        assert!(
+            !toc.contains(">A & B<"),
+            "raw & must not reach the ToC: {toc}"
+        );
     }
 
     #[test]
