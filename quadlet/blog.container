@@ -13,14 +13,13 @@ Pull=newer
 # Reachable inside the pod at 127.0.0.1:3000; no host publish needed.
 User=65532:65532
 ReadOnly=true
+ReadOnlyTmpfs=false
 DropCapability=all
 NoNewPrivileges=true
 # ponytail: static binary never forks/climbs; tighten further on a single-app host.
-PodmanArgs=--memory=256m --cpus=1 --pids-limit=100 --ulimit nofile=1024:1024
+PodmanArgs=--memory=128m --cpus=1 --pids-limit=20 --ulimit nofile=256:256
 
 [Service]
-# Compose `restart: unless-stopped` ≈ systemd Restart=always
-# (a deliberate `systemctl stop` is still respected).
 Restart=always
 TimeoutStartSec=60
 

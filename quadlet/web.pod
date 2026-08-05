@@ -4,6 +4,7 @@ Description=Web app pod (blog + caddy)
 # Containers reach each other on 127.0.0.1; ports are published by the pod.
 
 [Pod]
+PodmanArgs=--memory=384m
 PublishPort=80:80
 PublishPort=443:443
 # ponytail: pod infra container adds ~5MB overhead vs. separate containers on a network.
