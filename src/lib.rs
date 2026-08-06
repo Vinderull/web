@@ -33,7 +33,7 @@ pub const SITE_NAME: &str = "My Bloginorium";
 
 /// Public URL of the site. Used for Atom feed absolute URIs. Change this
 /// to match your domain before deploying.
-pub const SITE_URL: &str = "https://bloginorium.com";
+pub const SITE_URL: &str = "https://bloginorium.me";
 
 #[derive(Clone)]
 struct AppState {
@@ -266,7 +266,7 @@ async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Result<Respo
     let mut resp = Response::new(Body::from(state.feed_xml.clone()));
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=60, s-maxage=600"),
+        HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
     );
     resp.headers_mut()
         .insert(header::ETAG, state.feed_etag.clone());
@@ -314,6 +314,7 @@ fn not_found_response(state: &AppState) -> Response {
     );
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    apply_security_headers(&mut resp);
     (StatusCode::NOT_FOUND, resp).into_response()
 }
 
@@ -450,7 +451,7 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
     let mut resp = Response::new(Body::from(body));
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=60, s-maxage=600"),
+        HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
     );
     resp.headers_mut().insert(header::ETAG, etag);
     resp.headers_mut().insert(
@@ -524,7 +525,7 @@ mod tests {
         assert_eq!(resp.headers().get(header::ETAG).unwrap(), "\"abc\"");
         assert_eq!(
             resp.headers().get(header::CACHE_CONTROL).unwrap(),
-            "public, max-age=60, s-maxage=600"
+            "public, max-age=43200, s-maxage=43200, immutable"
         );
     }
 

@@ -76,7 +76,7 @@ async fn index_returns_200_with_cache_headers() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
-        "public, max-age=60, s-maxage=600"
+        "public, max-age=43200, s-maxage=43200, immutable"
     );
     assert!(headers.contains_key(header::ETAG));
     let body = String::from_utf8(body).unwrap();
@@ -358,7 +358,7 @@ async fn about_page_200_with_cache_headers() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
-        "public, max-age=60, s-maxage=600"
+        "public, max-age=43200, s-maxage=43200, immutable"
     );
     assert!(headers.contains_key(header::ETAG));
     let body = String::from_utf8(body).unwrap();
@@ -412,7 +412,7 @@ async fn feed_returns_atom_xml_with_correct_content_type() {
     assert!(headers.contains_key(header::ETAG));
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
-        "public, max-age=60, s-maxage=600"
+        "public, max-age=43200, s-maxage=43200, immutable"
     );
     let body = String::from_utf8(body).unwrap();
     assert!(body.contains("<feed"), "should have feed root element");
