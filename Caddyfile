@@ -2,6 +2,16 @@
 # Caddy automatically provisions and renews Let's Encrypt TLS certs.
 bloginorium.me www.bloginorium.me {
 	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		-Server
+	}
+
+	request_body {
+		max_size 1MB
+	}
+
 	reverse_proxy 127.0.0.1:3000 {
 		health_uri /healthz
 		health_interval 5s

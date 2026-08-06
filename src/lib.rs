@@ -480,6 +480,12 @@ fn apply_security_headers(resp: &mut Response) {
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("default-src 'self'; style-src 'self'; script-src 'self'"),
     );
+    resp.headers_mut().insert(
+        header::HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static(
+            "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), document-domain=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()",
+        ),
+    );
 }
 
 /// Stable ETag for a rendered body.
