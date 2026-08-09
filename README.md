@@ -8,8 +8,36 @@ Personal blog built with Rust, axum, and htmx.
 - **askama** 0.16 — compile-time HTML templates
 - **htmx** 2.0 — progressive enhancement (SPA-like navigation via `hx-boost`)
 - **pulldown-cmark** — Markdown rendering
+- **syntect** — syntax highlighting at load time
+- **ammonia** — HTML sanitization
+- **atom_syndication** — Atom feed generation
 - **landlock** — Linux kernel sandboxing (filesystem + network restrictions)
 - **tower-http** — static file serving, request tracing
+
+## Features
+
+- **Pre-rendered at boot** — all pages, tag indexes, and the Atom feed are
+  rendered once at startup. Requests do hashmap lookups, not per-request
+  template rendering.
+- **ETag-based caching** — every pre-rendered page has a deterministic xxh3
+  ETag. Cached clients get `304 Not Modified` across deploys.
+- **Atom feed** — `/feed.xml` with full-content entries, tag categories, and
+  proper RFC 3339 timestamps.
+- **Tags** — `/tags` lists all tags with post counts; `/tags/{tag}` shows
+  matching posts.
+- **Search** — htmx-powered live search (`/search`); falls back to a
+  full-page request when JavaScript is disabled.
+- **Previous/next navigation** — every post page links to the chronologically
+  adjacent posts.
+- **Reading time** — estimated from word count, shown on each post.
+- **Syntax highlighting** — load-time `syntect` with CSS classes (no inline
+  styles), CSP-friendly.
+- **Custom 404** — styled 404 page for unknown routes, slugs, and tags.
+- **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, and a strict CSP on every
+  HTML response.
+- **Standalone pages** — `/about` served from `content/pages/about.md`.
+- **Easter egg** — `418 I'm a teapot` at `/teapot`.
 
 ## Project structure
 
@@ -20,10 +48,12 @@ static/            CSS, JS (htmx self-hosted)
 templates/         Askama HTML templates
 src/
   main.rs          Entry point: config, bind, sandbox, serve
+  lib.rs           Router, handlers, AppState, pre-rendering, ETags
   config.rs        Environment-based configuration
   sandbox.rs       Landlock sandbox setup
   posts.rs         Post loading, frontmatter parsing, markdown rendering
   templates.rs     Askama template structs
+  feed.rs          Atom feed generation
 .devcontainer/     Multi-stage Dockerfile (dev + runtime), devcontainer config
 quadlet/           Podman Quadlet units (systemd-managed pod: blog + Caddy)
 ```
@@ -55,6 +85,7 @@ Create a Markdown file in `content/posts/` with TOML frontmatter:
 title = "My Post"
 date = "2024-01-15"
 description = "Optional description for SEO"
+tags = ["rust", "web"]
 +++
 
 Markdown content here.
@@ -124,8 +155,8 @@ podman run --rm -p 127.0.0.1:3000:3000 localhost/blog:latest
 ```
 
 For local testing the [`build-run.sh`](build-run.sh) helper does both of those
-steps in one shot — it builds the `runtime` image (as `localhost/blog:latest`)
-and runs it loopback-only on `127.0.0.1:3000`:
+steps in one shot — it builds the `runtime` image (as `blog:latest`) and runs it
+loopback-only on `127.0.0.1:3000`:
 
 ```bash
 ./build-run.sh

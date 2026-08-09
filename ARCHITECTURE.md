@@ -3,7 +3,8 @@
 A static-ish personal blog: posts are Markdown files with TOML frontmatter,
 rendered to HTML once at startup and served from memory. The runtime is a
 single statically-linked binary sandboxed with Linux landlock, fronted in
-production by Caddy for TLS.
+production by Caddy for TLS. Site name/URL are compile-time constants
+(`SITE_NAME` = "My Bloginorium", `SITE_URL` = "https://bloginorium.me").
 
 ```
                  ┌─────────── Browser (htmx) ───────────┐
@@ -17,19 +18,19 @@ production by Caddy for TLS.
                                      │ HTTP (pod localhost)
             ┌────────────────────────▼────────────────────────┐
             │  axum 0.8 server  (distroless, UID 65532)        │
-            │  Router · State<Arc<Vec<Post>>> · TraceLayer     │
-            │  ┌──────────┬────────────┬──────────┬────────┐  │
-            │  │ /        │ /posts/{slug}│ /healthz │ /static│  │
-            │  └────┬─────┴──────┬──────┴──────────┴───┬────┘  │
-            │       │            │                       │       │
-            │  Askama render   Askama render          ServeDir  │
-            │  (index.html)   (post.html)            (tower-http)│
-            │       \            /                       │       │
-            │   in-memory pre-rendered HTML            static/   │
-            │   (Arc<Vec<Post>>, loaded at boot)        (RO FS)  │
-            └────────────────────────────────────────────┼───────┘
-                                                         │
-                              landlock: only static/ readable; rest denied
+            │  Router · AppState · TraceLayer                  │
+            │  ┌───────────┬───────────┬──────────┬────────┐  │
+            │  │ /  /about │/posts/{s}│/tags /tags/{t}      │  │
+            │  │ /search   │/feed.xml │ /teapot  │/healthz │  │
+            │  └─────┬─────┴─────┬─────┴──────────┴───┬────┘  │
+            │        │           │                      │       │
+            │   Pre-rendered    Pre-rendered         ServeDir  │
+            │   HTML + ETag     HTML + ETag       (tower-http) │
+            │   (built at boot, (hashmap lookup)   static/     │
+            │    hashmap lookup)                  (RO FS)      │
+            └───────────────────────────────────────┼──────────┘
+                                                     │
+                          landlock: only static/ readable; rest denied
 ```
 
 ## Layers
@@ -52,54 +53,79 @@ truth. Posts are read **once at startup**, never at request time.
    code blocks are syntax-highlighted in the same pass with `syntect`
    (`ClassedHTMLGenerator`, `tok-*` classes — not inline styles, so the
    `style-src 'self'` CSP holds); colors come from the generated theme CSS in
-   `static/css/main.css`.
+   `static/css/main.css`. The final HTML is sanitized through `ammonia`
+   (allowlists safe elements/attributes; strips everything else).
 4. `format_date` — `YYYY-MM-DD` → `"[month repr:long] [day], [year]"` via the
-   `time` crate. `tags` is a flat `Vec<String>` (default empty).
+   `time` crate.
+5. `reading_time` — word count ÷ 200, rounded up to nearest integer.
+6. `tags` is a flat `Vec<String>` (default empty).
 
 Result: `Vec<Post>` sorted by date **descending**, each `Post` carrying its
-slug, title, display date, optional description, pre-rendered body HTML, and
-**pre-rendered ToC HTML**. Rendering never happens on the request path.
+slug, title, display date, optional description, pre-rendered body HTML,
+**pre-rendered ToC HTML**, tags, and reading time. Rendering never happens on
+the request path.
 
 ### 3. Template layer — Askama compile-time templates (`templates/`)
-Three templates compiled by Askama at build time (type-checked, zero runtime
+Eight templates compiled by Askama at build time (type-checked, zero runtime
 parsing):
 - `base.html` — shared layout: `<head>`, `<header>`, `<main>` block,
   `<footer>` (copyright + MIT notice), loads `/static/css/main.css` and
   `/static/js/htmx.min.js`, sets `hx-boost="true"` on `<body>`.
 - `index.html` — extends `base`, lists all posts (title + date → `/posts/{slug}`)
-  and a search field that `hx-get`s `/search`, swapping the list in place.
+  and a search `GET` form that works with or without JavaScript.
 - `post.html` — extends `base`, renders one post's pre-baked HTML via
   `{{ post.html|safe }}`, a precomputed `{{ post.toc|safe }}` nav (empty posts
-  omit it), an optional `<meta description>` in the `head` block, and flat
-  `tags` rendered as links to `/tags/{tag}`.
+  omit it), an optional `<meta description>` in the `head` block, flat
+  `tags` rendered as links to `/tags/{tag}`, reading time, and
+  previous/next post navigation links.
 - `tags.html` / `tag.html` — extends `base`; the former lists every tag (with
   post counts) linking to `/tags/{tag}`, the latter lists the posts for one tag.
-  Both are pre-rendered at boot like the index.
+  Both pre-rendered at boot.
 - `page.html` — extends `base`, renders a standalone page (e.g. `/about`) from
   `content/pages/*.md`. Pages have no date/tags/ToC/reading time.
+- `search_results.html` — bare fragment (no `<html>`): `<ul>` of matching
+  posts, used by htmx search swaps. Includes an empty-state message when no
+  posts match.
+- `404.html` — styled 404 page extending `base`, shown on unknown routes and
+  unknown slugs/tags.
 
-Rust sides (`src/templates.rs`): `IndexTemplate<'a> { posts: &'a [Post] }` and
-`PostTemplate<'a> { post: &'a Post }` — they borrow the in-memory `Post`s.
-`PageTemplate<'a> { page: &'a Page }` renders the about page (present only if
-`content/pages/about.md` exists).
+Rust side (`src/templates.rs`): `IndexTemplate<'a>` (posts + query + site_name),
+`PostTemplate<'a>` (post + newer/older + site_name), `PageTemplate<'a>` (page +
+site_name), `SearchResultsTemplate<'a>` (posts + query), `TagsIndexTemplate<'a>`
+(tags + site_name), `TagTemplate<'a>` (tag + posts + site_name),
+`NotFoundTemplate<'a>` (site_name). All borrow the in-memory `Post`s/`Page`s.
 
-### 4. Web server layer — axum 0.8 + tower-http (`src/main.rs`)
-A `Router` with shared `AppState { posts: Arc<Vec<Post>> }`:
+### 4. Web server layer — axum 0.8 + tower-http (`src/lib.rs`)
+A `Router` with shared `AppState` containing pre-rendered `Bytes` + `ETag`
+values for every page, built once in `build_app()`. Request handlers do pure
+hashmap lookups + ETag comparisons — no per-request Askama rendering.
+
 | Route | Handler | Returns |
 |-------|---------|---------|
-| `GET /` | `index` | rendered `index.html` (`Html<String>`) |
-| `GET /posts/{slug}` | `post` | rendered `post.html`; O(n) search → `404` if miss |
-| `GET /search` | `search` | htmx fragment `<ul id="post-list">`; scans in-memory posts, `no-store` |
-| `GET /tags` | `tags_index` | rendered `tags.html` (all tags + counts, cached) |
-| `GET /tags/{tag}` | `tag` | rendered `tag.html`; lookup → `404` if unknown |
+| `GET /` | `index` | pre-rendered index HTML, `304` on matching ETag |
+| `GET /posts/{slug}` | `post` | pre-rendered post; hashmap lookup → `404` if miss |
+| `GET /search` | `search` | htmx fragment or full page; `no-store`; linear scan |
+| `GET /tags` | `tags_index` | pre-rendered tags index (all tags + counts) |
+| `GET /tags/{tag}` | `tag` | pre-rendered tag page; hashmap lookup → `404` if unknown |
+| `GET /about` | `about` | pre-rendered about page (404 if no `content/pages/about.md`) |
+| `GET /teapot` | `teapot` | `418 I'm a teapot` easter egg (text/plain, no caching) |
+| `GET /feed.xml` | `feed` | pre-rendered Atom feed (`application/atom+xml`) |
+| `GET /feed` | redirect | permanent redirect to `/feed.xml` |
 | `GET /healthz` | inline | `"ok"` as `text/plain` (Caddy health gate) |
 | `GET /static/*` | `ServeDir` | files streamed from `static/` (tower-http `fs`) |
+| (fallback) | `not_found` | pre-rendered 404 page |
 
 - `TraceLayer::new_for_http()` (tower-http `trace`) wraps every request in a
   tracing span for structured per-request logging.
-- Posts are immutable after load and shared cheaply via `Arc`; handlers take
-  `State<AppState>` (clones the `Arc`).
-- Render failures map to `500`; unknown slug to `404`.
+- All mutable work (markdown → HTML, Askama rendering, feed XML generation)
+  happens in `build_app()` before the router is built. The request path only
+  does hashmap lookups and ETag comparisons.
+- ETags are deterministic xxh3 hashes of the rendered HTML `Bytes`, so they
+  are stable across restarts and deploys — cached clients keep getting `304`s.
+- Cached routes set `Cache-Control: public, max-age=43200, s-maxage=43200, immutable`.
+- Security headers on every HTML response: `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`,
+  `Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'`.
 
 ### 5. Frontend layer — htmx 2.0 + CSS (`static/`)
 - `htmx.min.js` is **self-hosted** (vendored, not a CDN) and loaded on every
@@ -111,7 +137,7 @@ A `Router` with shared `AppState { posts: Arc<Vec<Post>> }`:
 
 ### 6. Runtime hardening layer — Landlock (`src/sandbox.rs`)
 Before the tokio runtime is created, `sandbox::apply(static_dir)` restricts
-the process with a Linux landlock ruleset (ABI V1 for broad kernel support):
+the process with a Linux landlock ruleset (ABI V9, `BestEffort` compatibility):
 - **Filesystem**: read-only access to `static_dir` only. `content/` is already
   in memory, the binary/templates/etc. become unreadable.
 - **Network**: `BindTcp` + `ConnectTcp` allowed (the listener is bound first;
@@ -162,11 +188,12 @@ Startup order is deliberate (each step justifies the next):
 
 ## Request lifecycle (`GET /posts/my-post`)
 Tracing span opens → router matches `/posts/{slug}` → axum injects cloned
-`State<Arc<Vec<Post>>>` and `Path(slug)` → handler searches posts → on hit,
-`PostTemplate { post }` renders against `post.html` (Askama) → `Html<String>`
-returned as `text/html`; miss → `404`; render error → `500`. Static assets hit
-`ServeDir` reading from the only landlock-readable path. SIGTERM/SIGINT drains
-in-flight requests, then the process exits.
+`State<AppState>` and `Path(slug)` → handler does hashmap lookup in
+`post_pages` → on hit, checks `If-None-Match` header against stored ETag:
+match returns `304 Not Modified`, miss returns `200` with the pre-rendered
+HTML bytes + `ETag` + cache headers; slug not found → pre-rendered 404 page.
+Static assets hit `ServeDir` reading from the only landlock-readable path.
+SIGTERM/SIGINT drains in-flight requests, then the process exits.
 
 ## Key invariants
 - **Posts are immutable and in-memory.** A new/changed post requires a restart
