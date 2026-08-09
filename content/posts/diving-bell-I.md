@@ -111,7 +111,7 @@ It is a glorious monstrosity that let's us do some nice things. All of our devel
 
 ## Carnival Cruise or Underwater Libertarian Allegory
 
-Now that we are speaking on containers, it is probably worth talking container runtimes. This project started as Docker based, and it still uses the Dockerfile language for expressing everything.
+Now that we are speaking of containers, it is probably worth talking container runtimes. This project started as Docker based, and it still uses the Dockerfile language for expressing everything.
 
 However, because I am a Fedora convert by way of [bluefin](https://projectbluefin.io/), and I have had my software life changed for the better via [distrobox](https://github.com/89luca89/distrobox), I have spent a fair amount of time in and around [podman](https://podman.io/). `podman` brings a lot to the table, and as of right now, the biggest selling point is its [pods,](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/building_running_and_managing_containers/assembly_working-with-pods_building-running-and-managing-containers) which let us weave together containers so they can share a [namespace](https://en.wikipedia.org/wiki/Linux_namespaces). For us, this means easily coupling our webserver app to a [caddy](https://caddyserver.com/) proxy for easy HTTPS/TLS- no relying on Cloudflare proxies for encryption in my undersea ideological paradise. 
 
