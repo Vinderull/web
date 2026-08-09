@@ -22,14 +22,13 @@ COPY . .
 # binary is copied out of it within the same RUN; a later COPY can't see it.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --release --target ${MUSL_TARGET} \
+    cargo build --release --locked --target ${MUSL_TARGET} \
     && cp target/${MUSL_TARGET}/release/web /web
 
 # ---- Runtime stage (for deployment) ----
 # Distroless static: no shell, no package manager, no libc (binary is musl-static).
 # :nonroot runs as UID 65532 without needing adduser.
 FROM gcr.io/distroless/static-debian13:nonroot AS runtime
-ARG MUSL_TARGET
 WORKDIR /app
 COPY --from=builder /web /app/web
 COPY --from=builder /build/content /app/content
