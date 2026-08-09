@@ -1,3 +1,23 @@
+# Build context: the builder only needs Cargo.{toml,lock}, src/,
+# templates/, content/, static/, and .cargo/ (holds the release profile that
+# strips the binary). Everything else is repo/ops material, not build input.
 target
 .git
+.jj
+.github
 .devcontainer
+examples
+quadlet
+design
+tests
+*.md
+*.bu
+*.yml
+*.yaml
+Caddyfile
+LICENSE
+NOTICE
+docker-compose.yml
+build-run.sh
+ignition.json
+blog.tar
