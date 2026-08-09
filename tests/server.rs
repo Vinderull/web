@@ -157,7 +157,7 @@ async fn index_sets_security_headers() {
     );
     assert_eq!(
         headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
-        "default-src 'self'; style-src 'self'; script-src 'self'"
+        web::CSP_VALUE,
     );
 }
 
@@ -246,7 +246,7 @@ async fn search_sets_security_headers() {
     );
     assert_eq!(
         headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
-        "default-src 'self'; style-src 'self'; script-src 'self'"
+        web::CSP_VALUE,
     );
     assert_eq!(
         headers.get(header::CONTENT_TYPE).unwrap(),
