@@ -35,6 +35,16 @@ pub const SITE_NAME: &str = "My Bloginorium";
 /// to match your domain before deploying.
 pub const SITE_URL: &str = "https://bloginorium.me";
 
+/// Content-Security-Policy header value applied to every HTML response.
+///
+/// The `'sha256-...'` hash allows the inline `<script>` in `templates/base.html`
+/// that disables htmx's localStorage history cache. To regenerate:
+///
+/// ```sh
+/// echo -n "htmx.config.historyCacheSize = 0" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64
+/// ```
+pub const CSP_VALUE: &str = "default-src 'self'; style-src 'self'; script-src 'self' 'sha256-j+kPDEhZq1pFWf++l0VBlQPpaGZRM+Mm5ClAZ1UOzWc='";
+
 #[derive(Clone)]
 struct AppState {
     index_html: Bytes,
@@ -479,7 +489,7 @@ fn apply_security_headers(resp: &mut Response) {
     );
     resp.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'; style-src 'self'; script-src 'self'"),
+        HeaderValue::from_static(CSP_VALUE),
     );
     resp.headers_mut().insert(
         header::HeaderName::from_static("permissions-policy"),
@@ -574,10 +584,7 @@ mod tests {
             h.get(header::REFERRER_POLICY).unwrap(),
             "strict-origin-when-cross-origin"
         );
-        assert_eq!(
-            h.get(header::CONTENT_SECURITY_POLICY).unwrap(),
-            "default-src 'self'; style-src 'self'; script-src 'self'"
-        );
+        assert_eq!(h.get(header::CONTENT_SECURITY_POLICY).unwrap(), CSP_VALUE,);
         assert_eq!(
             h.get(header::CONTENT_TYPE).unwrap(),
             "text/html; charset=utf-8"
