@@ -10,6 +10,7 @@ Image=docker.io/caddy:2.11-alpine
 ContainerName=caddy
 Pod=web.pod
 ReadOnly=true
+User=1000:1000
 AutoUpdate=registry
 Pull=newer
 DropCapability=all
