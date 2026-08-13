@@ -85,6 +85,20 @@ storage:
       contents:
         inline: |
           blacklist usb-storage
+    # kernel hardening: restrict info leaks and unprivileged kernel interfaces
+    - path: /etc/sysctl.d/99-hardening.conf
+      mode: 0444
+      contents:
+        inline: |
+          kernel.kptr_restrict = 2
+          kernel.dmesg_restrict = 1
+          kernel.unprivileged_bpf_disabled = 1
+          kernel.yama.ptrace_scope = 1
+          net.ipv4.conf.all.rp_filter = 1
+          net.ipv4.conf.all.accept_redirects = 0
+          net.ipv6.conf.all.accept_redirects = 0
+          fs.protected_hardlinks = 1
+          fs.protected_symlinks = 1
     # disabe core user sudo access
     #- path: /etc/sudoers.d/core-passwd
     #  mode: 0444
@@ -94,6 +108,16 @@ storage:
 
 systemd:
   units:
+    # SSH daemon via socket activation (Flatcar default). A dropin on
+    # sshd.socket overrides the port to match sshd_config; sshd spins up
+    # on-demand per connection.
+    - name: sshd.socket
+      dropins:
+        - name: 10-port.conf
+          contents: |
+            [Socket]
+            ListenStream=
+            ListenStream=49989
     - name: web-pod.service
       enabled: true
     # Keep quadlet containers up to date: podman-auto-update.timer (ships with
