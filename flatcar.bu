@@ -117,6 +117,10 @@ storage:
             fs.protected_fifos = 1
             net.ipv4.tcp_syncookies = 1
             fs.suid_dumpable = 0
+            # Safe: rootful podman uses the host userns (no CLONE_NEWUSER).
+            user.max_user_namespaces = 0
+            kernel.perf_event_paranoid = 3
+            kernel.sysrq = 0
     # disabe core user sudo access
     #- path: /etc/sudoers.d/core-passwd
     #  mode: 0444
