@@ -18,6 +18,15 @@ DropCapability=all
 NoNewPrivileges=true
 # ponytail: static binary never forks/climbs; tighten further on a single-app host.
 PodmanArgs=--memory=128m --cpus=1 --pids-limit=20 --ulimit nofile=256:256
+# Health check curls /healthz in the pod namespace. Notify=healthy delays
+# systemd's "active" notification until the health check passes, so Caddy
+# (After=blog.service) won't start until blog is actually serving.
+HealthCmd=curl -fsS http://127.0.0.1:3000/healthz || exit 1
+HealthInterval=5s
+HealthStartPeriod=60s
+HealthTimeout=3s
+HealthRetries=2
+Notify=healthy
 
 [Service]
 Restart=always
