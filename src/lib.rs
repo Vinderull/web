@@ -18,7 +18,6 @@ use axum::{
     routing::get,
 };
 use tower_http::services::ServeDir;
-use tower_http::trace::TraceLayer;
 
 use askama::Template;
 use serde::Deserialize;
@@ -216,7 +215,6 @@ pub fn build_app(
         .route("/robots.txt", get(robots_txt))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
-        .layer(TraceLayer::new_for_http())
         .fallback(not_found)
         .with_state(state))
 }

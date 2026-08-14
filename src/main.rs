@@ -2,20 +2,13 @@ use axum::Router;
 use web::{build_app, config::Config, posts, sandbox};
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let config = Config::from_env()?;
-    tracing::info!("Content dir: {}", config.content_dir.display());
-    tracing::info!("Static dir: {}", config.static_dir.display());
+    println!("Content dir: {}", config.content_dir.display());
+    println!("Static dir: {}", config.static_dir.display());
 
     // Load posts from disk before sandboxing
     let loaded_posts = posts::load_all(&config.content_dir)?;
-    tracing::info!("Loaded {} posts", loaded_posts.len());
+    println!("Loaded {} posts", loaded_posts.len());
 
     // Load standalone pages alongside posts, before sandboxing (landlock
     // denies reads outside static/ once applied).
@@ -26,7 +19,7 @@ fn main() -> anyhow::Result<()> {
     // Bind listener before applying landlock (landlock would block bind on V4+)
     let listener = std::net::TcpListener::bind(&config.bind_addr)?;
     listener.set_nonblocking(true)?;
-    tracing::info!("Listening on {}", config.bind_addr);
+    println!("Listening on {}", config.bind_addr);
 
     // Apply landlock sandbox before starting tokio runtime so worker threads
     // inherit the landlock domain.
@@ -58,7 +51,7 @@ fn main() -> anyhow::Result<()> {
                 _ = ctrl_c => {}
                 _ = sigterm => {}
             }
-            tracing::info!("Shutdown signal received");
+            println!("Shutdown signal received");
         };
 
         axum::serve(listener, app)
