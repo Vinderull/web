@@ -213,6 +213,7 @@ pub fn build_app(
         .route("/teapot", get(teapot))
         .route("/feed.xml", get(feed))
         .route("/feed", get(|| async { Redirect::permanent("/feed.xml") }))
+        .route("/robots.txt", get(robots_txt))
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(TraceLayer::new_for_http())
@@ -259,6 +260,21 @@ async fn teapot() -> Response {
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
     (StatusCode::IM_A_TEAPOT, resp).into_response()
+}
+
+async fn robots_txt() -> Response {
+    let mut resp = Response::new(Body::from(
+        "User-agent: *\nDisallow: /search\nDisallow: /teapot\n",
+    ));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    resp
 }
 
 async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
@@ -831,5 +847,37 @@ mod tests {
         let (status, body) = not_found_body("/about").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(body.contains("404"), "should render the custom 404 page");
+    }
+
+    #[tokio::test]
+    async fn robots_txt_disallows_search() {
+        let app = build_app(Vec::new(), None, Path::new("static")).unwrap();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/robots.txt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        let body = String::from_utf8(
+            resp.into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            body,
+            "User-agent: *\nDisallow: /search\nDisallow: /teapot\n"
+        );
     }
 }
