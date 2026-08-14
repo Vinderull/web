@@ -149,6 +149,17 @@ storage:
           [storage]
           driver = "overlay"
           rootless_storage_path = "/var/lib/containers/storage-web"
+    # Store journal only in memory (tmpfs), not on disk. Deliberately
+    # ephemeral: no remote log sink, and the journal (incl. sshd audit
+    # trail) is disposable across reboots. That tradeoff is accepted.
+    - path: /etc/systemd/journald.conf.d/10-volatile-storage.conf
+      mode: 0444
+      contents:
+        inline: |
+          [Journal]
+          Storage=volatile
+          RuntimeMaxUse=16M
+          RuntimeMaxFileSize=4M
     # disabe core user sudo access
     #- path: /etc/sudoers.d/core-passwd
     #  mode: 0444
@@ -188,6 +199,11 @@ systemd:
     # systemd restarts the generated quadlet units. Enabling it here means no
     # manual `sudo systemctl enable --now podman-auto-update.timer` on the box.
     - name: podman-auto-update.timer
+      enabled: true
+    # Preemptive OOM handling on a 512MB box: kernel OOM kills semi-randomly
+    # (often sshd, locking us out). oomd uses cgroup-v2 pressure to reap the
+    # biggest memory user (the pod) first instead.
+    - name: systemd-oomd.service
       enabled: true
     # Restrict docker to just root
     - name: docker.socket
