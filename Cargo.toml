@@ -1,13 +1,13 @@
 [package]
 name = "web"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 
 [dependencies]
 # axum: default pulls form/json/matched-path/original-uri/tower-log/tracing;
 # we only use the HTTP1 server, the Query extractor, and tokio-backed serve.
 axum = { version = "0.8", default-features = false, features = ["http1", "query", "tokio"] }
-tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "net", "signal"] }
 tower-http = { version = "0.7", default-features = false, features = ["fs", "trace"] }
 askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
@@ -27,12 +27,11 @@ syntect = { version = "5.2", default-features = false, features = ["default-fanc
 # restarts (unlike DefaultHasher) so cached clients keep getting 304s across
 # deploys. no_std, zero transitive deps.
 xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
-# atom_syndication: Atom feed generation. Pre-rendered at boot like everything else.
-atom_syndication = "0.12"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 
 [dev-dependencies]
+tokio = { version = "1.53", default-features = false, features = ["macros"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 http-body-util = "0.1"
