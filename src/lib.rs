@@ -259,6 +259,7 @@ async fn teapot() -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
+    apply_security_headers(&mut resp);
     (StatusCode::IM_A_TEAPOT, resp).into_response()
 }
 
@@ -274,19 +275,12 @@ async fn robots_txt() -> Response {
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=86400"),
     );
+    apply_security_headers(&mut resp);
     resp
 }
 
 async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
-    let matched = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .map(|inm| {
-            inm.split(',')
-                .any(|t| t.trim() == state.feed_etag.to_str().unwrap_or(""))
-        })
-        .unwrap_or(false);
-    if matched {
+    if etag_matches(&headers, &state.feed_etag) {
         return Ok(StatusCode::NOT_MODIFIED.into_response());
     }
     let mut resp = Response::new(Body::from(state.feed_xml.clone()));
@@ -384,8 +378,12 @@ async fn search(
     headers: HeaderMap,
     Query(params): Query<SearchQuery>,
 ) -> Response {
-    let query = params.q.unwrap_or_default();
-    let results = search_posts(&state.posts, &state.search_haystacks, &query);
+    let raw = params.q.unwrap_or_default();
+    // Truncate once up front: the truncated form feeds both the search
+    // function and the template, so the reflected query in the response
+    // body is bounded regardless of input length.
+    let query = truncate_query(&raw);
+    let results = search_posts_with(&state.posts, &state.search_haystacks, &query);
     let is_htmx = headers
         .get(header::HeaderName::from_static("hx-request"))
         .is_some_and(|v| v == "true");
@@ -416,6 +414,16 @@ async fn search(
     resp
 }
 
+/// Truncate and trim a search query, returning the empty string when the
+/// result is blank — a blank query means "return all posts."
+fn truncate_query(raw: &str) -> String {
+    raw.chars()
+        .take(MAX_QUERY_LEN)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Build the per-post lowercased search haystack (title + description + body),
 /// index-aligned with `posts`. Built once at boot and reused for every search.
 fn build_haystacks(posts: &[posts::Post]) -> Vec<String> {
@@ -436,22 +444,18 @@ fn build_haystacks(posts: &[posts::Post]) -> Vec<String> {
 
 /// Case-insensitive substring match on the pre-lowercased title/description/
 /// body haystack. `haystacks` is index-aligned with `posts` and built once at
-/// boot. A blank query returns every post (so clearing the box restores the
-/// full list). Queries are trimmed and length-capped.
-fn search_posts<'a>(
+/// boot. A blank query returns every post. The caller is responsible for
+/// truncation and trimming; the query here is already a trimmed, lowercased,
+/// length-bounded string.
+fn search_posts_with<'a>(
     posts: &'a [posts::Post],
     haystacks: &[String],
     query: &str,
 ) -> Vec<&'a posts::Post> {
-    let q = query
-        .chars()
-        .take(MAX_QUERY_LEN)
-        .collect::<String>()
-        .trim()
-        .to_lowercase();
-    if q.is_empty() {
+    if query.is_empty() {
         return posts.iter().collect();
     }
+    let q = query.to_lowercase();
     posts
         .iter()
         .zip(haystacks)
@@ -460,18 +464,21 @@ fn search_posts<'a>(
         .collect()
 }
 
-/// Build a weakly-caching HTML response: 304 on matching `If-None-Match`,
-/// otherwise the body with `Cache-Control` + `ETag` headers.
-fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
-    let matched = headers
+/// True when any ETag in the request's `If-None-Match` header matches `etag`.
+fn etag_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
+    headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
-        .map(|inm| {
+        .is_some_and(|inm| {
             inm.split(',')
                 .any(|t| t.trim() == etag.to_str().unwrap_or(""))
         })
-        .unwrap_or(false);
-    if matched {
+}
+
+/// Build a weakly-caching HTML response: 304 on matching `If-None-Match`,
+/// otherwise the body with `Cache-Control` + `ETag` headers.
+fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
+    if etag_matches(&headers, &etag) {
         return StatusCode::NOT_MODIFIED.into_response();
     }
     let mut resp = Response::new(Body::from(body));
@@ -739,17 +746,17 @@ mod tests {
         }
         let haystacks = build_haystacks(&posts);
         // Every post must match an empty query.
-        assert_eq!(search_posts(&posts, &haystacks, "").len(), posts.len());
-        assert_eq!(search_posts(&posts, &haystacks, "   ").len(), posts.len());
+        assert_eq!(search_posts_with(&posts, &haystacks, "").len(), posts.len());
+        assert_eq!(search_posts_with(&posts, &haystacks, "").len(), posts.len());
 
         // A title match, including a case-insensitive variant.
-        let by_title = search_posts(&posts, &haystacks, &posts[0].title);
+        let by_title = search_posts_with(&posts, &haystacks, &posts[0].title);
         assert!(
             by_title.iter().any(|p| p.slug == posts[0].slug),
             "title should match its own post"
         );
         assert!(
-            search_posts(&posts, &haystacks, &posts[0].title.to_uppercase())
+            search_posts_with(&posts, &haystacks, &posts[0].title.to_uppercase())
                 .iter()
                 .any(|p| p.slug == posts[0].slug),
             "title match should be case-insensitive"
@@ -758,7 +765,7 @@ mod tests {
         // A description-only match.
         if let Some(desc) = &posts[0].description {
             assert!(
-                search_posts(&posts, &haystacks, desc)
+                search_posts_with(&posts, &haystacks, desc)
                     .iter()
                     .any(|p| p.slug == posts[0].slug),
                 "description should match its own post"
@@ -766,7 +773,7 @@ mod tests {
         }
 
         // A garbage query returns nothing.
-        assert!(search_posts(&posts, &haystacks, "qqqqzzzznope").is_empty());
+        assert!(search_posts_with(&posts, &haystacks, "qqqqzzzznope").is_empty());
     }
 
     #[test]
@@ -788,16 +795,18 @@ mod tests {
         let haystacks = build_haystacks(&posts);
         // A short, real query matches the post whose haystack contains it.
         assert!(
-            search_posts(&posts, &haystacks, "abc")
+            search_posts_with(&posts, &haystacks, "abc")
                 .iter()
                 .any(|p| p.slug == "x")
         );
-        // An oversized query whose only meaningful token sits beyond the cap
-        // is truncated, so it no longer matches anything.
+        // An oversized query is truncated by truncate_query before reaching
+        // search_posts_with. After truncation to MAX_QUERY_LEN, the trailing
+        // "abc" is dropped so nothing matches.
         let oversized = format!("{}abc", "a".repeat(MAX_QUERY_LEN));
         assert!(oversized.len() > MAX_QUERY_LEN);
+        let capped = truncate_query(&oversized);
         assert_eq!(
-            search_posts(&posts, &haystacks, &oversized).len(),
+            search_posts_with(&posts, &haystacks, &capped).len(),
             0,
             "after truncation to MAX_QUERY_LEN the tail 'abc' is dropped"
         );

@@ -2,8 +2,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-// ponytail: ABI V1 covers basic filesystem rights (read/write/execute).
-// Bump to V3+ after testing to also restrict truncate, ioctl_dev, etc.
+// Using ABI V9 (the latest): covers basic filesystem rights plus
+// truncate, ioctl_dev, and the newer network access controls (BindTcp,
+// ConnectTcp).
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
