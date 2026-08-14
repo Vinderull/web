@@ -90,10 +90,8 @@ sudo systemctl restart caddy
   read-only; Caddy writes only to the `/data` and `/config` named volumes, the
   blog app writes nothing.
 - **`DropCapability=all`** on both containers — drops all Linux capabilities
-  Podman would otherwise grant. Caddy runs as `User=1000:1000` (non-root inside
-  the container; the official image ships `/data` and `/config` as world-writable
-  `chmod 1777`, so any UID can write there). Privileged port binding (80/443)
-  still works via `AddCapability=NET_BIND_SERVICE` in the rootful pod context.
+  Podman would otherwise grant. Caddy's privileged port binding (80/443) still
+  works via the pod's rootful context or rootless ambient `CAP_NET_BIND_SERVICE`.
 - **Healthcheck gating**: the blog app exposes `GET /healthz` → `200 ok` (added
   to `src/main.rs`). The Caddyfile's `reverse_proxy` block uses
   `health_path /healthz` so Caddy only routes to the blog once it's healthy and
