@@ -50,7 +50,10 @@ pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
     let mut posts = Vec::new();
 
     if !posts_dir.exists() {
-        tracing::warn!("Posts directory not found: {}", posts_dir.display());
+        eprintln!(
+            "Warning: posts directory not found: {}",
+            posts_dir.display()
+        );
         return Ok(posts);
     }
 
@@ -87,7 +90,10 @@ pub fn load_pages(content_dir: &Path) -> Result<Vec<Page>> {
     let mut pages = Vec::new();
 
     if !pages_dir.exists() {
-        tracing::warn!("Pages directory not found: {}", pages_dir.display());
+        eprintln!(
+            "Warning: pages directory not found: {}",
+            pages_dir.display()
+        );
         return Ok(pages);
     }
 
@@ -286,7 +292,10 @@ fn highlight_code(lang: &str, code: &str) -> String {
     );
     for line in LinesWithEndings::from(code) {
         if let Err(err) = generator.parse_html_for_line_which_includes_newline(line) {
-            tracing::debug!(?err, lang, "syntect failed; rendering code uncolored");
+            eprintln!(
+                "Warning: syntect failed (lang={}); rendering code uncolored: {err}",
+                lang
+            );
             return format!("<pre><code>{}</code></pre>", escape_html(code));
         }
     }

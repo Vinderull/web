@@ -44,13 +44,13 @@ mod linux {
                 if status.ruleset == RulesetStatus::NotEnforced {
                     bail!("Landlock ruleset could not be enforced despite kernel support");
                 }
-                tracing::info!(
+                println!(
                     "Landlock sandbox enforced (effective ABI V{})",
                     *effective_abi as u32
                 );
             }
             _ => {
-                tracing::warn!("Landlock not supported by kernel; running without sandbox");
+                eprintln!("Warning: Landlock not supported by kernel; running without sandbox");
             }
         }
 
@@ -65,6 +65,6 @@ pub fn apply(static_dir: &Path) -> Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 pub fn apply(_static_dir: &Path) -> Result<()> {
-    tracing::warn!("Landlock is only available on Linux; running without sandbox");
+    eprintln!("Warning: Landlock is only available on Linux; running without sandbox");
     Ok(())
 }
