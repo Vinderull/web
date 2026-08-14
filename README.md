@@ -111,9 +111,9 @@ refuses to start.
 ## Deployment
 
 The runtime image is built `FROM scratch` — a fully static musl binary, no
-shell, no libc, no `/etc/passwd`. The image contains only the binary, content,
-and static assets, running as a non-root user (UID 65532). `CONTENT_DIR` and
-`STATIC_DIR` are baked in via the Dockerfile `ENV`.
+shell, no libc, no `/etc/passwd`, no userspace of any kind. The image contains
+only the binary, content, and static assets, running as a non-root user (UID
+65532). `CONTENT_DIR` and `STATIC_DIR` are baked in via the Dockerfile `ENV`.
 
 CI (`.github/workflows/ci.yml`) builds the runtime image and pushes it to
 `ghcr.io/vinderull/web:latest` on each GitHub Release. The Quadlet units pull
