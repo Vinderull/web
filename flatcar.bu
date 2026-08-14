@@ -11,6 +11,19 @@
 variant: flatcar
 version: 1.1.0
 storage:
+  directories:
+    - path: /home/web
+      mode: 0700
+      user:
+        name: web
+      group:
+        name: web
+    - path: /var/lib/containers/storage-web
+      mode: 0700
+      user:
+        name: web
+      group:
+        name: web
   files:
     # Podman is an opt-in Flatcar system extension (sysext), not in the base
     # image. Writing its name here makes Flatcar pull & merge flatcar-podman at
@@ -36,23 +49,23 @@ storage:
       mode: 0444
       contents:
         local: Caddyfile
-    - path: /etc/containers/systemd/web.pod
+    - path: /etc/containers/systemd/users/2000/web.pod
       mode: 0444
       contents:
         local: quadlet/web.pod
-    - path: /etc/containers/systemd/blog.container
+    - path: /etc/containers/systemd/users/2000/blog.container
       mode: 0444
       contents:
         local: quadlet/blog.container
-    - path: /etc/containers/systemd/caddy.container
+    - path: /etc/containers/systemd/users/2000/caddy.container
       mode: 0444
       contents:
         local: quadlet/caddy.container
-    - path: /etc/containers/systemd/caddy-data.volume
+    - path: /etc/containers/systemd/users/2000/caddy-data.volume
       mode: 0444
       contents:
         local: quadlet/caddy-data.volume
-    - path: /etc/containers/systemd/caddy-config.volume
+    - path: /etc/containers/systemd/users/2000/caddy-config.volume
       mode: 0444
       contents:
         local: quadlet/caddy-config.volume
@@ -105,8 +118,7 @@ storage:
             net.ipv4.conf.default.accept_source_route = 0
             net.ipv4.conf.all.send_redirects = 0
             net.ipv4.conf.default.send_redirects = 0
-            # Needed by podman
-            net.ipv4.ip_forward = 1
+            net.ipv4.ip_forward = 0
             net.ipv6.conf.all.accept_redirects = 0
             net.ipv6.conf.default.accept_redirects = 0
             net.ipv6.conf.all.accept_source_route = 0
@@ -117,10 +129,26 @@ storage:
             fs.protected_fifos = 1
             net.ipv4.tcp_syncookies = 1
             fs.suid_dumpable = 0
-            # Safe: rootful podman uses the host userns (no CLONE_NEWUSER).
-            user.max_user_namespaces = 0
+            # Rootless podman requires user namespaces — one per container plus one for
+            # the pod infra, plus headroom for setup/exec.
+            # Overrides the rootful default of 0 in this same file.
+            user.max_user_namespaces = 100
             kernel.perf_event_paranoid = 3
             kernel.sysrq = 0
+    # Persist the unprivileged port floor: allows the unprivileged web user to
+    # bind 80/443 without CAP_NET_BIND_SERVICE.
+    - path: /etc/sysctl.d/60-rootless-ports.conf
+      mode: 0444
+      contents:
+        inline: |
+          net.ipv4.ip_unprivileged_port_start = 80
+    - path: /etc/containers/storage.conf
+      mode: 0444
+      contents:
+        inline: |
+          [storage]
+          driver = "overlay"
+          rootless_storage_path = "/var/lib/containers/storage-web"
     # disabe core user sudo access
     #- path: /etc/sudoers.d/core-passwd
     #  mode: 0444
@@ -140,8 +168,20 @@ systemd:
             [Socket]
             ListenStream=
             ListenStream=49989
-    - name: web-pod.service
+    # Enable linger for the web user so its systemd --user session starts at
+    # boot without requiring a login.
+    - name: enable-linger-web.service
       enabled: true
+      contents: |
+        [Unit]
+        Description=Enable linger for web
+        After=systemd-user-sessions.service
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/loginctl enable-linger web
+        [Install]
+        WantedBy=multi-user.target
     # Keep quadlet containers up to date: podman-auto-update.timer (ships with
     # the flatcar-podman sysext) runs `podman auto-update` on a schedule.
     # `Update=registry` in blog.container makes it pull the latest image, then
@@ -159,6 +199,17 @@ systemd:
 
 passwd:
   users:
+    - name: web
+      uid: 2000
+      primary_group: web
+      groups:
+        - systemd-journal
+      # No SSH keys — the web account is the runtime daemon, not an interactive
+      # operator. SSH is restricted to the core admin account (see sshd_config).
+      # Ignition's useradd auto-allocates subuid/subgid ranges in /etc/sub{u,g}id.
     - name: core
       ssh_authorized_keys:
         - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHzOTEaaLIk/vVAEGpfGZX1iuKGXiDhflxQsdBpKzyWC [EMAIL]
+  groups:
+    - name: web
+      gid: 2000

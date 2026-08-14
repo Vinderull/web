@@ -14,7 +14,7 @@ Pull=newer
 User=65532:65532
 ReadOnly=true
 ReadOnlyTmpfs=false
-DropCapability=all
+#DropCapability=all
 NoNewPrivileges=true
 # ponytail: static binary never forks/climbs; tighten further on a single-app host.
 PodmanArgs=--memory=128m --cpus=1 --pids-limit=20 --ulimit nofile=256:256
@@ -28,4 +28,4 @@ Restart=always
 TimeoutStartSec=60
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

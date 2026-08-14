@@ -110,34 +110,32 @@ refuses to start.
 
 ## Deployment
 
-The runtime image is **distroless** (`gcr.io/distroless/static-debian13:nonroot`)
-— no shell, no package manager, no libc. The binary is statically linked with
-musl, so the final image is ~2.3MB and contains only the binary, content, and
-static assets, running as a non-root user (UID 65532). `CONTENT_DIR` and
+The runtime image is built `FROM scratch` — a fully static musl binary, no
+shell, no libc, no `/etc/passwd`. The image contains only the binary, content,
+and static assets, running as a non-root user (UID 65532). `CONTENT_DIR` and
 `STATIC_DIR` are baked in via the Dockerfile `ENV`.
 
-Deployment targets Podman — the runtime image is built with `podman build` from
-the same multi-stage Dockerfile (`runtime` stage) used in development.
+CI (`.github/workflows/ci.yml`) builds the runtime image and pushes it to
+`ghcr.io/vinderull/web:latest` on each GitHub Release. The Quadlet units pull
+from GHCR (`Update=registry`), so no local build is needed for deployment.
 
 ### Option A: Podman Quadlet + Caddy (recommended for production)
 
 `quadlet/` contains systemd-managed Podman units that run the blog app and a
 [Caddy](https://caddyserver.com/) reverse proxy together in a single **pod**.
 Caddy automatically provisions and renews Let's Encrypt TLS certificates, so
-this is the path to HTTPS on a real domain. Quadlet does not build images, so
-build the runtime image once and rebuild on code changes:
+this is the path to HTTPS on a real domain. Caddy terminates TLS on ports
+80/443 and proxies to the blog over the pod's shared localhost namespace; the
+blog is not published to the host, so all external traffic goes through Caddy.
+
+See [`quadlet/README.md`](quadlet/README.md) for the full setup — rootless
+systemd Quadlet units and the Flatcar/VPS Ignition provisioning flow.
+
+To build locally (e.g. for testing before a release):
 
 ```bash
-# Build the distroless runtime image
-podman build -t localhost/blog:latest --target runtime -f .devcontainer/Dockerfile .
+podman build -t ghcr.io/vinderull/web:latest --target runtime -f .devcontainer/Dockerfile .
 ```
-
-Then install the units, start the pod, and edit the `Caddyfile` domain. See
-[`quadlet/README.md`](quadlet/README.md) for the full setup — rootful/rootless
-variants and the Flatcar/VPS Ignition provisioning flow. Caddy terminates TLS
-on ports 80/443 and proxies to the blog over the pod's shared localhost
-namespace; the blog is not published to the host, so all external traffic goes
-through Caddy. Caddy also adds `zstd`/`gzip` compression (see `Caddyfile`).
 
 ### Option B: plain podman (no reverse proxy)
 
@@ -145,7 +143,7 @@ through Caddy. Caddy also adds `zstd`/`gzip` compression (see `Caddyfile`).
 # The Dockerfile lives in .devcontainer/ — use -f to point to it
 podman build -t localhost/blog:latest --target runtime -f .devcontainer/Dockerfile .
 
-# Publish to the host on all interfaces (0.0.0.0); LAN-visible in rootful mode.
+# Publish to the host on all interfaces (0.0.0.0)
 podman run --rm -p 3000:3000 localhost/blog:latest
 
 # Loopback-only: not exposed to the network. Prefer this for local dev.
@@ -155,8 +153,8 @@ podman run --rm -p 127.0.0.1:3000:3000 localhost/blog:latest
 ```
 
 For local testing the [`build-run.sh`](build-run.sh) helper does both of those
-steps in one shot — it builds the `runtime` image (as `blog:latest`) and runs it
-loopback-only on `127.0.0.1:3000`:
+steps in one shot — it builds the `runtime` image and runs it loopback-only on
+`127.0.0.1:3000`:
 
 ```bash
 ./build-run.sh

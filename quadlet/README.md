@@ -33,30 +33,33 @@ podman build -f .devcontainer/Dockerfile --target runtime -t ghcr.io/vinderull/w
 ```
 
 ## 2. Install the units
-Rootful (needed for privileged ports 80/443 without extra sysctl):
+
+**Rootless** (production — runs as the `web` system user):
+
+The Ignition config writes the units to
+`/etc/containers/systemd/users/2000/` (matching the `web` user's pinned
+UID 2000). The system manager picks them up and generates user-session
+service files. On first boot `enable-linger-web.service` enables lingering
+so `web`'s `systemd --user` session starts automatically.
+
+To install on a non-Ignition box (e.g. a dev VM):
 
 ```sh
+# Create the user-session quadlet directory for UID 2000
+sudo mkdir -p /etc/containers/systemd/users/2000
 sudo cp quadlet/*.pod quadlet/*.container quadlet/*.volume \
-  /etc/containers/systemd/
+  /etc/containers/systemd/users/2000/
 sudo systemctl daemon-reload
-```
-
-Rootless alternative (runs as your user):
-
-```sh
-mkdir -p ~/.config/containers/systemd
-cp quadlet/* ~/.config/containers/systemd/
-systemctl --user daemon-reload
-# Privileged ports require:
-# sudo sysctl net.ipv4.ip_unprivileged_port_start=80
+# Ensure the sysctl for unprivileged ports is set
+sudo sysctl net.ipv4.ip_unprivileged_port_start=80
+# Enable lingering for the web user
+sudo loginctl enable-linger web
 ```
 
 ## 3. Start
 ```sh
-# rootful
-sudo systemctl start web-pod
-# rootless
-systemctl --user start web-pod
+# rootless — manage via web's user session
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user start web-pod
 ```
 
 Starting `web-pod` brings up the pod infra container; `caddy` and
@@ -69,7 +72,22 @@ localhost inside the shared pod namespace. Edit the domain to match yours;
 reload Caddy with:
 
 ```sh
-sudo systemctl restart caddy
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart caddy
+```
+
+## Managing the rootless deployment
+
+All commands run via `web`'s user session:
+
+```sh
+# status
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user status web-pod
+# logs — as the web user
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 journalctl --user -u web-pod -u blog -u caddy
+# or by UID
+journalctl _UID=2000
+# restart a container
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 ```
 
 ## Notes / deviations from compose
@@ -78,7 +96,7 @@ sudo systemctl restart caddy
   keyless-signed with cosign) when you publish a GitHub Release (against a `v*`
   tag); `blog.container`
   pulls it via `Update=registry`, so a deploy is just
-  `systemctl restart blog`.
+  `systemctl --user restart blog`.
 - **`expose:`**: omitted — it's informational in compose; reachability comes from
   the shared pod localhost namespace.
 - **`depends_on`**: modeled with `Requires=`/`After=`/`Before=` ordering. Caddy
@@ -89,9 +107,14 @@ sudo systemctl restart caddy
 - **ReadOnly root** (`ReadOnly=true`) on both containers — root filesystems are
   read-only; Caddy writes only to the `/data` and `/config` named volumes, the
   blog app writes nothing.
-- **`DropCapability=all`** on both containers — drops all Linux capabilities
-  Podman would otherwise grant. Caddy's privileged port binding (80/443) still
-  works via the pod's rootful context or rootless ambient `CAP_NET_BIND_SERVICE`.
+- **`DropCapability=all`** on the blog container (distroless binary needs no
+  capabilities, and it works because the image's static binary doesn't trigger
+  the OCI runtime bounding-set issue). Caddy does not drop all — in rootless
+  mode with crun, dropping all caps also clears the bounding set, which
+  prevents the OCI runtime from exec'ing the process. The user namespace
+  already strips real privileges, so the default caps are harmless. The sysctl
+  `net.ipv4.ip_unprivileged_port_start=80` covers port binding instead of
+  `NET_BIND_SERVICE`.
 - **Healthcheck gating**: the blog app exposes `GET /healthz` → `200 ok` (added
   to `src/main.rs`). The Caddyfile's `reverse_proxy` block uses
   `health_path /healthz` so Caddy only routes to the blog once it's healthy and
@@ -101,6 +124,7 @@ sudo systemctl restart caddy
   (an infra restart bounces both containers) vs. the separate-container variant.
 
 ## Flatcar / VPS provisioning
+
 The steps above (1–4) assume a general-purpose host where you `cp` the units by
 hand. On Flatcar Container Linux there is no package manager and `/etc` is
 provisioned at first boot via Ignition — the units and Caddyfile are written in
@@ -141,10 +165,14 @@ butane --pretty -d . flatcar.bu -o ignition.json
 
 Most providers (Hetzner, DigitalOcean, Equinix, Vultr) accept `ignition.json` as
 the user-data / custom Ignition field when booting a Flatcar stable image.
-On first boot Ignition writes `/etc/web/Caddyfile` and the six quadlet units
-under `/etc/containers/systemd/`, enables `web-pod.service`, and writes `podman`
-to `/etc/flatcar/enabled-sysext.conf`. The blog image is pulled from GHCR on
-first start; the cosign signature check runs automatically via `policy.json`.
+On first boot Ignition:
+- Creates the `web` user (UID 2000) with auto-allocated subuid/subgid ranges
+- Writes `/etc/web/Caddyfile` and the six quadlet units under
+  `/etc/containers/systemd/users/2000/`
+- Writes `podman` to `/etc/flatcar/enabled-sysext.conf`
+- Creates `/var/lib/containers/storage-web` owned by `web`
+- Writes `/etc/containers/storage.conf` (`driver = "overlay"`, `rootless_storage_path` on `/var/lib/containers/storage-web`)
+- Enables the `enable-linger-web` oneshot so `web`'s user session starts at boot
 
 Podman is **not** in the Flatcar base image; it is an opt-in system extension
 (sysext, available since 3941.0.0). The `enabled-sysext.conf` entry makes Flatcar
@@ -153,18 +181,20 @@ first boot). The extension ships a podman new enough to include the Quadlet
 generator. See https://www.flatcar.org/docs/latest/provisioning/sysext/
 
 ### 4. Start the pod (image pulls from GHCR)
-The quadlet units live under `/etc/containers/systemd/`, which survives Flatcar
-auto-update reboots. The blog image is pulled from GHCR on first start
-(`Update=registry`); the image cache lives in `/var` and also persists.
+The quadlet units live under `/etc/containers/systemd/users/2000/`, which
+survives Flatcar auto-update reboots. The blog image is pulled from GHCR on
+first start (`Update=registry`); the image cache lives in
+`/var/lib/containers/storage-web` and also persists.
 
 ```sh
+# On first boot the enable-linger-web.service has already run. The generated
+# user-session services are available; reload and start via web's user session:
 ssh user@vps
-sudo systemctl daemon-reload        # runs the quadlet generator
-sudo systemctl start web-pod        # pulls in blog + caddy;
-                                    # blog pulls ghcr.io/vinderull/web:latest
-sudo systemctl status web-pod
-journalctl -u blog -f               # watch the image pull + app boot
-journalctl -u caddy -f              # watch Caddy obtain the Let's Encrypt cert
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user daemon-reload
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user start web-pod
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user status web-pod
+# Watch logs
+journalctl _UID=2000 -f
 ```
 
 > If the pull fails with `image not known` / `access denied`, confirm the GHCR
@@ -181,26 +211,33 @@ re-pulls the `:latest` tag on restart:
 # dev machine — publish a release (creates/pushes the tag + fires CI)
 gh release create v1.2.3 --generate-notes
 # vps (once CI's deploy job is green)
-sudo systemctl restart blog             # re-pulls ghcr.io/vinderull/web:latest
+sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 ```
 
 To pin a specific release instead of floating on `:latest`, set the tag in
 `blog.container` (e.g. `Image=ghcr.io/vinderull/web:v1.2.3` — version tags are
 published by the CI `deploy` job alongside `:latest`), copy the unit to
-`/etc/containers/systemd/`, `daemon-reload`, then `restart`.
+`/etc/containers/systemd/users/2000/`, `daemon-reload`, then `restart`.
 
 ### Notes
-- **Rootful**: this config runs rootful (units in `/etc/containers/systemd/`),
-  so privileged ports 80/443 bind without any sysctl changes. For rootless, use
-  `~/.config/containers/systemd/` + `systemctl --user`, set
-  `net.ipv4.ip_unprivileged_port_start=80`, and enable lingering.
-- **Persistence**: `/etc` and `/var` persist across Flatcar auto-update reboots,
-  so the units, Caddyfile, named volumes (`caddy-data` / `caddy-config` → TLS
-  certs and ACME leases), and the pulled `ghcr.io/vinderull/web:latest` image
-  cache all survive. The pod auto-starts (`Restart=always` + enabled unit).
+- **Rootless**: this config runs fully rootless — units in
+  `/etc/containers/systemd/users/2000/` (the system manager's user-session
+  directory), managed via `sudo -u web XDG_RUNTIME_DIR=/run/user/2000
+  systemctl --user`. The sysctl `net.ipv4.ip_unprivileged_port_start=80` allows
+  binding 80/443 without capabilities. The `web` user has no SSH access and is
+  isolated from the `core` admin account.
+- **Persistence**: `/etc`, `/var`, and `/var/lib/containers/storage-web` persist
+  across Flatcar auto-update reboots, so the units, Caddyfile, named volumes
+  (`caddy-data` / `caddy-config` → TLS certs and ACME leases), and the pulled
+  `ghcr.io/vinderull/web:latest` image cache all survive.
 - **Podman sysext**: podman is opt-in on Flatcar (not in the base image).
   `flatcar.bu` writes `podman` to `/etc/flatcar/enabled-sysext.conf`, so Flatcar
   pulls and merges `flatcar-podman` at first boot. The extension is versioned
   to the OS and auto-updates with Flatcar releases.
 - **Caddyfile changes**: edit `/etc/web/Caddyfile` on the VPS, then
-  `sudo systemctl restart caddy`.
+  `sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart caddy`.
+- **Re-provisioning**: `flatcar-reset` (re-provisioning) does not preserve
+  `/home` by default, but container storage is now on `/var` at
+  `/var/lib/containers/storage-web`, so it survives. Rootless named volumes
+  live under that graph root — do not silently point at old rootful volumes;
+  re-provision fresh and let Caddy re-issue the cert (or migrate deliberately).
