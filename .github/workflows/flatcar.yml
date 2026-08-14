@@ -1,0 +1,25 @@
+name: Flatcar
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "flatcar.bu"
+      - "quadlet/**"
+      - "ignition.json"
+
+permissions:
+  contents: read
+
+jobs:
+  butane:
+    name: butane validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install butane
+        run: |
+          curl -fsSL https://github.com/coreos/butane/releases/latest/download/butane-x86_64-unknown-linux-gnu -o /usr/local/bin/butane
+          chmod +x /usr/local/bin/butane
+      - name: Validate flatcar.bu
+        run: butane --strict --pretty -d . flatcar.bu -o /dev/null
