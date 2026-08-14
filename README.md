@@ -10,7 +10,6 @@ Personal blog built with Rust, axum, and htmx.
 - **pulldown-cmark** — Markdown rendering
 - **syntect** — syntax highlighting at load time
 - **ammonia** — HTML sanitization
-- **atom_syndication** — Atom feed generation
 - **landlock** — Linux kernel sandboxing (filesystem + network restrictions)
 - **tower-http** — static file serving, request tracing
 
@@ -22,7 +21,8 @@ Personal blog built with Rust, axum, and htmx.
 - **ETag-based caching** — every pre-rendered page has a deterministic xxh3
   ETag. Cached clients get `304 Not Modified` across deploys.
 - **Atom feed** — `/feed.xml` with full-content entries, tag categories, and
-  proper RFC 3339 timestamps.
+  proper RFC 3339 timestamps. Generated with a hand-rolled writer plus
+  RFC 4287 compliance tests.
 - **Tags** — `/tags` lists all tags with post counts; `/tags/{tag}` shows
   matching posts.
 - **Search** — htmx-powered live search (`/search`); falls back to a
