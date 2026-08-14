@@ -11,7 +11,7 @@
           "signedIdentity": { "type": "matchRepository" }
         }
       ],
-      "docker.io/library": [{ "type": "insecureAcceptAnything" }]
+      "docker.io/library/caddy": [{ "type": "insecureAcceptAnything" }]
     }
   }
 }
