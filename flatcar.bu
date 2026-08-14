@@ -128,6 +128,12 @@ storage:
             fs.protected_regular = 2
             fs.protected_fifos = 1
             net.ipv4.tcp_syncookies = 1
+            # TIME-WAIT assassination protection
+            net.ipv4.tcp_rfc1337 = 1
+            # Explicit overrides of Flatcar defaults (true by default but stated
+            # here so the intended posture is not dependent on distro defaults).
+            net.ipv4.icmp_ignore_bogus_error_responses = 1
+            kernel.randomize_va_space = 2
             fs.suid_dumpable = 0
             # Rootless podman requires user namespaces — one per container plus one for
             # the pod infra, plus headroom for setup/exec.
