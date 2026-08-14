@@ -35,6 +35,10 @@ pub const SITE_NAME: &str = "My Bloginorium";
 /// to match your domain before deploying.
 pub const SITE_URL: &str = "https://bloginorium.me";
 
+/// Site author shown in the Atom feed. RFC 4287 requires at least one
+/// author element on the feed.
+pub const SITE_AUTHOR: &str = "Ryan Dufour";
+
 /// Content-Security-Policy header value applied to every HTML response.
 ///
 /// The `'sha256-...'` hash allows the inline `<script>` in `templates/base.html`
@@ -181,11 +185,7 @@ pub fn build_app(
 
     // Pre-render the Atom feed from all posts. Rendered once at boot, served
     // from memory like every other page.
-    let feed_xml = Bytes::from(
-        feed::build_feed(posts_slice)
-            .context("building Atom feed")?
-            .to_string(),
-    );
+    let feed_xml = Bytes::from(feed::build_feed(posts_slice));
     let feed_etag = etag_for(&feed_xml);
 
     let state = AppState {
