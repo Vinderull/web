@@ -26,15 +26,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp target/${MUSL_TARGET}/release/web /web
 
 # ---- Runtime stage (for deployment) ----
-# Distroless static: no shell, no package manager, no libc (binary is musl-static).
-# :nonroot runs as UID 65532 without needing adduser.
-FROM gcr.io/distroless/static-debian13:nonroot AS runtime
+# Scratch: the binary is fully static musl, zero deps. No shell, no
+# package manager, no libc, no /etc/ssl/certs, no /etc/passwd.
+FROM scratch AS runtime
 WORKDIR /app
 COPY --from=builder /web /app/web
 COPY --from=builder /build/content /app/content
 COPY --from=builder /build/static /app/static
 ENV CONTENT_DIR=/app/content \
     STATIC_DIR=/app/static
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 3000
 CMD ["/app/web"]
