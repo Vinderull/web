@@ -6,8 +6,8 @@ target = "x86_64-unknown-linux-musl"
 linker = "musl-gcc"
 
 [profile.release]
-opt-level = "z"     # Optimize for size
-lto = true          # Enable Link Time Optimization
+opt-level = "s"     # Optimize for size
+lto = "thin"        # Enable Link Time Optimization
 codegen-units = 1   # Reduce parallel code generation units
 panic = "abort"     # Remove stack unwinding
 strip = true        # Automatically strip symbols (Rust 1.59+)
