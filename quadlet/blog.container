@@ -16,7 +16,7 @@ ReadOnly=true
 ReadOnlyTmpfs=false
 #DropCapability=all
 NoNewPrivileges=true
-# ponytail: static binary never forks/climbs; tighten further on a single-app host.
+# note: static binary never forks/climbs; tighten further on a single-app host.
 PodmanArgs=--memory=128m --cpus=1 --pids-limit=20 --ulimit nofile=256:256
 # No systemd HealthCmd: the distroless image has no curl and no /bin/sh (podman
 # runs string health checks via CMD-SHELL), so one always fails; Notify=healthy

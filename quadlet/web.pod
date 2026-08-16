@@ -7,7 +7,7 @@ Description=Web app pod (blog + caddy)
 PodmanArgs=--memory=384m
 PublishPort=80:80
 PublishPort=443:443
-# ponytail: pod infra container adds ~5MB overhead vs. separate containers on a network.
+# note: pod infra container adds ~5MB overhead vs. separate containers on a network.
 
 [Service]
 Restart=always

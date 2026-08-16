@@ -55,7 +55,7 @@ struct AppState {
     // Pre-rendered post pages keyed by slug. Posts are immutable for the
     // process lifetime, so each page renders once at boot and is served as a
     // pure lookup + header check.
-    // ponytail: flat HashMap; fine while posts fit in RAM. A DB-backed store
+    // note: flat HashMap; fine while posts fit in RAM. A DB-backed store
     // would replace this at corpus scale.
     post_pages: Arc<HashMap<String, (Bytes, HeaderValue)>>,
     // The in-memory posts, retained for the read-only `/search` and `/tags/*`
@@ -74,7 +74,7 @@ struct AppState {
     // Per-post lowercased search haystack, index-aligned with `posts`. Built
     // once at boot so every lookup during a search avoids re-lowercasing the
     // whole corpus per keystroke.
-    // ponytail: linear scan over the corpus per request; fine while posts fit
+    // note: linear scan over the corpus per request; fine while posts fit
     // in RAM, an inverted index would replace this at corpus scale.
     search_haystacks: Arc<Vec<String>>,
     // Pre-rendered Atom feed. Built once at boot, served from memory like
