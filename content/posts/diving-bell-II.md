@@ -53,7 +53,7 @@ TimeoutStartSec=60
 [Install]
 WantedBy=default.target
 ```
-Now this lets us do some neat stuff. The big one, for me: `AutoUpdate`. This lets me have an entire deployment pipeline. I let `GitHub` build and push to their `ghcr.io` registry and now my webserver will just check a few times a day if there is a new image available. I don't need to `scp` anything over, or manually restart anything. The `quadlet` service will just track `latest` for me and pull/restart the new container after it gets published.
+Now this lets us do some neat stuff. The big one, for me: `AutoUpdate`. This lets me have an entire deployment pipeline. I have `GitHub` build and push to the `ghcr.io` registry and now my webserver will just check a few times a day if there is a new image available. I don't need to `scp` anything over, or manually restart anything. The `quadlet` service will just track `latest` for me and pull/restart the new container after it gets published.
 
 From here, we can further lock down the container capabilities
 ```text
@@ -62,7 +62,7 @@ ReadOnlyTmpfs=false
 #DropCapability=all
 NoNewPrivileges=true
 ```
-This means the container now has a read-only `rootfs` and can't gain any new privileges. The container is `scratch`, so there's not much attack surface already, but this is a nice warm-fuzzy on a damp night out at sea. 
+This means the container now has a read-only `rootfs` and can't gain any new privileges. The container is `scratch`, so there's not much attack surface already, but this is a nice warm, wool blanket on a cold, damp night out at sea. 
 
 
 For posterity ([future sailors](https://youtu.be/UtRXK5wKZCk?si=PqAPQP5hELjynKA1) love posterity), here is the complementary `caddy.container`:  
@@ -147,9 +147,9 @@ bloginorium.me www.bloginorium.me {
 	}
 }
 ```
-And voilà, we've got [TLS](https://www.cloudflare.com/learning/ssl/transport-layer-security-tls/) certs, some health checks, some header magic, and some coupled processes working together to deliver this content into your eyeballs (or screen reader).
+And voilà, we've got [TLS](https://www.cloudflare.com/learning/ssl/transport-layer-security-tls/) certs, some health checks, some header voodoo, and some coupled processes working together to deliver this content into your eyeballs (or screen reader).
 
-All of the container orchestration is expressed in a very `systemd` like form, that reads like most every other `systemd` thing. Additionally, we get `journalctl` logging ([warts and all](https://github.com/systemd/systemd/issues/15292)) for free. Now, I am not some `systemd` evangelist, and I really don't wish to be caught up in the [init](https://www.devuan.org/os/init-freedom) wars, but having a semi-coherent mental model from an admin perspective has some benefits.  
+All of the container orchestration is expressed in a very `systemd` like way, that reads like most every other `systemd` thing. Additionally, we get `journalctl` logging ([warts and all](https://github.com/systemd/systemd/issues/15292)) for free. Now, I am not some `systemd` evangelist, and I really don't wish to be caught up in the [init](https://www.devuan.org/os/init-freedom) wars, but having a semi-coherent mental model from an admin perspective has some benefits.  
 
 Now, I know, the whole `pod` thing is very [Kubernetes](https://kubernetes.io/docs/concepts/workloads/pods/) [coded](https://knowyourmeme.com/memes/coded-slang) and not `podman` specific, but, I'll be honest, I really haven't had much-if-any exposure to Kubernetes in my travels. My days are spent doing [RTL](https://en.wikipedia.org/wiki/Register-transfer_level) and the [systems programming](https://devopedia.org/systems-programming) that goes with it. I deal with bits, the 0s and 1s, the aughts and the *not*-aughts; none of this highfalutin web development posh.
 
