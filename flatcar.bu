@@ -199,13 +199,27 @@ systemd:
         ExecStart=/usr/bin/loginctl enable-linger web
         [Install]
         WantedBy=multi-user.target
-    # Keep quadlet containers up to date: podman-auto-update.timer (ships with
-    # the flatcar-podman sysext) runs `podman auto-update` on a schedule.
-    # `Update=registry` in blog.container makes it pull the latest image, then
-    # systemd restarts the generated quadlet units. Enabling it here means no
-    # manual `sudo systemctl enable --now podman-auto-update.timer` on the box.
-    - name: podman-auto-update.timer
+    # Enable the rootless podman-auto-update.timer in the web user session so
+    # quadlet containers stay up to date. `Update=registry` in blog.container
+    # makes it pull the latest image, then systemd restarts the generated
+    # quadlet units. Enabling the *user* timer (not the system one, which only
+    # sees rootful containers) means no manual `systemctl --user enable --now
+    # podman-auto-update.timer` on the box.
+    - name: enable-podman-auto-update-web.service
       enabled: true
+      contents: |
+        [Unit]
+        Description=Enable rootless podman-auto-update.timer for web
+        # linger must be active first so the web user manager (and its
+        # /run/user/2000 bus) is up; runuser can then reach systemctl --user.
+        # Order-only: no lifecycle coupling to the linger service.
+        After=enable-linger-web.service
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/runuser -u web -- systemctl --user enable --now podman-auto-update.timer
+        [Install]
+        WantedBy=multi-user.target
     # Preemptive OOM handling on a 512MB box: kernel OOM kills semi-randomly
     # (often sshd, locking us out). oomd uses cgroup-v2 pressure to reap the
     # biggest memory user (the pod) first instead.
