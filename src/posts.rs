@@ -546,6 +546,29 @@ mod tests {
     }
 
     #[test]
+    fn test_render_markdown_footnote() {
+        let md = "A note[^1] and another[^2].\n\n[^1]: First note.\n\n[^2]: Second with *formatting*.";
+        let (html, _) = render_markdown(md);
+        // Inline reference link survives the sanitizer (ammonia appends rel).
+        assert!(
+            html.contains(r##"<sup class="footnote-reference"><a href="#1""##),
+            "expected footnote reference: {html}"
+        );
+        // Definition block with its id survives; inner markdown is rendered.
+        assert!(
+            html.contains(r##"<div class="footnote-definition" id="2">"##),
+            "expected footnote definition: {html}"
+        );
+        assert!(
+            html.contains("<sup class=\"footnote-definition-label\">2</sup>")
+                && html.contains("<em>formatting</em>"),
+            "definition label and formatting: {html}"
+        );
+        // No inline styles, so the strict CSP holds.
+        assert!(!html.contains("style=\""), "no inline styles (CSP): {html}");
+    }
+
+    #[test]
     fn test_render_markdown_table() {
         let md = "| A | B |\n|---|---|\n| 1 | 2 |";
         let (html, _) = render_markdown(md);

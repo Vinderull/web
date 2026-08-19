@@ -159,6 +159,29 @@ article .post-date {
     color: #555;
 }
 
+.post-content .footnote-reference {
+    font-size: 0.75em;
+    vertical-align: super;
+    line-height: 0;
+}
+
+.post-content .footnote-reference a {
+    text-decoration: none;
+}
+
+.post-content .footnote-definition {
+    margin: 1.5rem 0;
+    padding: 0.6rem 1rem;
+    border-left: 3px solid var(--border);
+    background: var(--code-bg);
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.post-content .footnote-definition p {
+    margin: 0.25rem 0;
+}
+
 .htmx-request .htmx-indicator {
     opacity: 1;
 }
