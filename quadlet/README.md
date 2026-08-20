@@ -82,10 +82,11 @@ All commands run via `web`'s user session:
 ```sh
 # status
 sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user status web-pod
-# logs — as the web user
-sudo -u web XDG_RUNTIME_DIR=/run/user/2000 journalctl --user -u web-pod -u blog -u caddy
-# or by UID
-journalctl _UID=2000
+# logs — as the web user. Rootless quadlet units write to the *system*
+# journal tagged _UID=2000, not the per-user journal, so --user misses them.
+journalctl -b _UID=2000
+# filter by unit afterward if wanted (journalctl's -u can't combine with _UID)
+journalctl _UID=2000 -b | grep -iE 'caddy|blog|update'
 # restart a container
 sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 ```
