@@ -18,7 +18,7 @@ ReadOnlyTmpfs=false
 NoNewPrivileges=true
 # note: static binary never forks/climbs; tighten further on a single-app host.
 PodmanArgs=--memory=128m --cpus=1 --pids-limit=20 --ulimit nofile=256:256
-# No systemd HealthCmd: the distroless image has no curl and no /bin/sh (podman
+# No systemd HealthCmd: the scratch image has no curl and no /bin/sh (podman
 # runs string health checks via CMD-SHELL), so one always fails; Notify=healthy
 # would wedge the service and keep Caddy (After=blog.service) from starting.
 # Caddy self-gates on /healthz (Caddyfile health_uri). Don't re-add HealthCmd.

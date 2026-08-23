@@ -17,7 +17,7 @@ production by Caddy for TLS. Site name/URL are compile-time constants
                           └──────────┬──────────┘
                                      │ HTTP (pod localhost)
             ┌────────────────────────▼────────────────────────┐
-            │  axum 0.8 server  (distroless, UID 65532)        │
+            │  axum 0.8 server  (scratch, UID 65532)           │
             │  Router · AppState · TraceLayer                  │
             │  ┌───────────┬───────────┬──────────┬────────┐  │
             │  │ /  /about │/posts/{s}│/tags /tags/{t}      │  │
@@ -164,9 +164,9 @@ Startup order is deliberate (each step justifies the next):
 ### 8. Build & deployment layer
 - **Dockerfile** (`.devcontainer/Dockerfile`) — multi-stage: `dev` (devcontainer
   toolchain + musl target), `builder` (`cargo build --release` against
-  `x86_64-unknown-linux-musl`), `runtime` (distroless
-  `static-debian13:nonroot`, copies binary + `content/` + `static/`, bakes
-  `CONTENT_DIR`/`STATIC_DIR` via `ENV`, runs as UID 65532, `EXPOSE 3000`).
+  `x86_64-unknown-linux-musl`), `runtime` (scratch, copies binary +
+  `content/` + `static/`, bakes `CONTENT_DIR`/`STATIC_DIR` via `ENV`, runs as
+  UID 65532, `EXPOSE 3000`).
   Final image ~2.3MB, no shell/libc/package-manager.
 - **Podman Quadlet** (`quadlet/`) — systemd units (`web.pod`,
   `blog.container`, `caddy.container`, `*.volume`) run the app + Caddy in one
@@ -174,7 +174,7 @@ Startup order is deliberate (each step justifies the next):
   Caddy publishes 80/443 and proxies. Read-only roots, all caps dropped,
   `Restart=always`. Caddy self-gates routing on `/healthz`.
 - **CI** (`.github/workflows/ci.yml`) — fmt/test/clippy via devcontainers,
-  a `docker-build` job that cosign-verifies the distroless base image, and a
+  a `docker-build` job that smoke-tests the scratch `runtime` build, and a
   release-triggered `deploy` job (fires on GitHub Release publish against a
   `v*` tag) that builds+pushes the `runtime` image to
   `ghcr.io/<owner>/web:latest` and `:<tag>`, then keyless-signs it with
