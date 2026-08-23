@@ -108,14 +108,6 @@ sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 - **ReadOnly root** (`ReadOnly=true`) on both containers — root filesystems are
   read-only; Caddy writes only to the `/data` and `/config` named volumes, the
   blog app writes nothing.
-- **`DropCapability=all`** on the blog container (scratch binary needs no
-  capabilities, and it works because the image's static binary doesn't trigger
-  the OCI runtime bounding-set issue). Caddy does not drop all — in rootless
-  mode with crun, dropping all caps also clears the bounding set, which
-  prevents the OCI runtime from exec'ing the process. The user namespace
-  already strips real privileges, so the default caps are harmless. The sysctl
-  `net.ipv4.ip_unprivileged_port_start=80` covers port binding instead of
-  `NET_BIND_SERVICE`.
 - **Healthcheck gating**: the blog app exposes `GET /healthz` → `200 ok` (added
   to `src/main.rs`). The Caddyfile's `reverse_proxy` block uses
   `health_path /healthz` so Caddy only routes to the blog once it's healthy and

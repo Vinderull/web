@@ -9,7 +9,7 @@ services:
       - "3000"
 
   caddy:
-    image: caddy:2
+    image: caddy:2.11-alpine
     restart: unless-stopped
     ports:
       - "80:80"
