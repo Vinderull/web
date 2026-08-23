@@ -13,7 +13,14 @@
 		timeouts {
 			read_body 15s
 			read_header 15s
-			write 30s
+			# write: Go's server WriteTimeout is an ABSOLUTE per-request deadline
+			# (from request arrival), and counts queued time on a constrained
+			# circuit. For Tor Browser (HTTP/2 over slow/high-latency circuits)
+			# that can trip even on small pre-rendered pages. The slowloris
+			# coverage we want comes from read_header; responses here are tiny
+			# and buffered, so a write bound buys little. Disabled to avoid
+			# harming legitimately slow (Tor) clients.
+			# write 30s
 		}
 	}
 }
