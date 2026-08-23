@@ -140,8 +140,13 @@ Before the tokio runtime is created, `sandbox::apply(static_dir)` restricts
 the process with a Linux landlock ruleset (ABI V9, `BestEffort` compatibility):
 - **Filesystem**: read-only access to `static_dir` only. `content/` is already
   in memory, the binary/templates/etc. become unreadable.
-- **Network**: `BindTcp` + `ConnectTcp` allowed (the listener is bound first;
-  after sandboxing new binds/connects are the only network ops permitted).
+- **Network**: `BindTcp` and `ConnectTcp` are both handled with no port-grant
+  rules, so landlock denies all TCP binding (the listener is already bound
+  before sandboxing) and all outbound connects (the server makes no external
+  calls).
+- **Scope**: abstract UNIX sockets and cross-process signals are scoped to the
+  sandbox domain — the blog connects to no UNIX sockets and signals no other
+  process, so both are confined against lateral movement within the pod.
 - Linux-only; non-Linux logs a warning and runs unsandboxed. Supported-but-
   unenforced is a hard error (server refuses to start). Worker threads spawned
   by the tokio runtime inherit the restricted domain.
@@ -200,7 +205,7 @@ SIGTERM/SIGINT drains in-flight requests, then the process exits.
   (re-run `load_all` at boot).
 - **The request path touches the filesystem only for `/static/*`.** Everything
   else is served from RAM, so landlock can deny the rest.
-- **No outbound network after sandboxing** except what the listener already
-  needs; the blog makes no external calls.
+- **No outbound network after sandboxing**: `ConnectTcp` is handled, so egress
+  connects are kernel-denied; the blog makes no external calls.
 - **Templates are compile-time checked** — a bad template fails the build, not
   a request.

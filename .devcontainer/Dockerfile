@@ -1,7 +1,7 @@
 ARG VARIANT="trixie"
 ARG MUSL_TARGET="x86_64-unknown-linux-musl"
 
-# ---- Dev stage (used by devcontainer) ----
+# ---- Dev stage (devcontainer base; toolchain source for builder) ----
 FROM mcr.microsoft.com/devcontainers/rust:2-1-${VARIANT} AS dev
 ARG MUSL_TARGET
 RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
@@ -9,11 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && rustup target add ${MUSL_TARGET}
 
 # ---- Builder stage (compiles release binary) ----
-FROM mcr.microsoft.com/devcontainers/rust:2-1-${VARIANT} AS builder
+# Reuses the dev stage so the CI runtime build and the devcontainer share one
+# toolchain bootstrap (same base image, musl-tools, and target registration).
+FROM dev AS builder
 ARG MUSL_TARGET
-RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
-    && rm -rf /var/lib/apt/lists/* \
-    && rustup target add ${MUSL_TARGET}
 WORKDIR /build
 COPY . .
 # Buildkit cache mounts persist the cargo registry + target dir across builds,
