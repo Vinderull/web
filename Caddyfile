@@ -6,6 +6,16 @@
 # loopback, letting a compromised blog reconfigure Caddy at runtime.
 {
 	admin off
+	# Bound request handling: no default read/write timeout means a hung or
+	# slow client holds a connection open indefinitely on this
+	# memory/pid-constrained box.
+	servers {
+		timeouts {
+			read_body 15s
+			read_header 15s
+			write 30s
+		}
+	}
 }
 
 bloginorium.me www.bloginorium.me {
