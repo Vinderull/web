@@ -1,5 +1,13 @@
 # Replace blog.example.com with your domain.
 # Caddy automatically provisions and renews Let's Encrypt TLS certs.
+
+# Disable the admin API (default localhost:2019). It is unauthenticated and
+# would otherwise be reachable from the blog container via the shared pod
+# loopback, letting a compromised blog reconfigure Caddy at runtime.
+{
+	admin off
+}
+
 bloginorium.me www.bloginorium.me {
 	encode zstd gzip
 
