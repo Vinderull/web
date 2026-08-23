@@ -3,15 +3,21 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 // Using ABI V9 (the latest): covers basic filesystem rights plus
-// truncate, ioctl_dev, and the newer network access controls (BindTcp,
-// ConnectTcp).
+// truncate, ioctl_dev, and the newer network access controls. Both BindTcp
+// and ConnectTcp are handled with no grant rules, so landlock denies all TCP
+// binding (the listener is bound before sandboxing) and all outbound connects
+// (the server makes no external calls).
+//
+// Abstract UNIX sockets and cross-process signals are scoped to the sandbox
+// domain: the blog neither connects to UNIX sockets nor signals other
+// processes, so both are confined against lateral movement within the pod.
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
 
     use landlock::{
         ABI, Access, AccessFs, AccessNet, CompatLevel, Compatible, LandlockStatus, PathBeneath,
-        PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
+        PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, Scope,
     };
 
     pub fn apply(static_dir: &Path) -> Result<()> {
@@ -23,6 +29,7 @@ mod linux {
             .handle_access(access_all)?
             .handle_access(AccessNet::BindTcp)?
             .handle_access(AccessNet::ConnectTcp)?
+            .scope(Scope::AbstractUnixSocket | Scope::Signal)?
             .create()?;
 
         // Posts are loaded into memory before sandboxing, so only the static
