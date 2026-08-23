@@ -23,6 +23,10 @@ Volume=/etc/web/Caddyfile:/etc/caddy/Caddyfile:ro
 # Named volumes via the Quadlet .volume units below.
 Volume=caddy-data.volume:/data
 Volume=caddy-config.volume:/config
+# NoNewPrivileges=true: Caddy is a single-process Go binary (no fork/exec of
+# children needing privilege gain); forbids later privilege escalation in the
+# TLS-terminating container that holds the certs/keys.
+NoNewPrivileges=true
 PodmanArgs=--memory=128m --cpus=1 --pids-limit=64 --ulimit nofile=4096:4096
 
 [Service]

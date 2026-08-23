@@ -13,6 +13,10 @@ Pull=newer
 # Reachable inside the pod at 127.0.0.1:3000; no host publish needed.
 User=65532:65532
 ReadOnly=true
+# ReadOnlyTmpfs=false: do NOT mount the writable tmpfs that ReadOnly would
+# otherwise add on /tmp, /run, /var/tmp, /dev, /dev/shm (default is true).
+# The image is static musl and keeps all data in memory — no scratch needed —
+# so the container is totally read-only.
 ReadOnlyTmpfs=false
 #DropCapability=all
 NoNewPrivileges=true
