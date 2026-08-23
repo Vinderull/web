@@ -7,6 +7,7 @@ on:
       - "flatcar.bu"
       - "quadlet/**"
       - "ignition.json"
+      - "Caddyfile"
 
 permissions:
   contents: read
@@ -23,3 +24,18 @@ jobs:
           chmod +x /usr/local/bin/butane
       - name: Validate flatcar.bu
         run: butane --strict --pretty -d . flatcar.bu -o /dev/null
+
+  caddy:
+    name: caddy validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install caddy
+        run: |
+          curl -fsSL https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_linux_amd64.tar.gz -o /tmp/caddy.tar.gz
+          tar xzf /tmp/caddy.tar.gz -C /usr/local/bin caddy
+          chmod +x /usr/local/bin/caddy
+      - name: Check Caddyfile formatting
+        run: caddy fmt --diff Caddyfile
+      - name: Validate Caddyfile
+        run: caddy validate --config Caddyfile --adapter caddyfile
