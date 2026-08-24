@@ -8,6 +8,14 @@ updates:
     open-pull-requests-limit: 10
     allow:
       - dependency-type: "all"
+    groups:
+      # Combine all patch bumps into a single PR per check.
+      # Minor and major bumps don't match (they fall through to individual PRs).
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
 
   # GitHub Actions used in CI workflows
   - package-ecosystem: "github-actions"
@@ -15,3 +23,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      # Combine all patch bumps into a single PR per check.
+      # Minor and major bumps don't match (they fall through to individual PRs).
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
