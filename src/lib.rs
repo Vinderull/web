@@ -40,13 +40,9 @@ pub const SITE_AUTHOR: &str = "Ryan Dufour";
 
 /// Content-Security-Policy header value applied to every HTML response.
 ///
-/// The `'sha256-...'` hash allows the inline `<script>` in `templates/base.html`
-/// that disables htmx's localStorage history cache. To regenerate:
-///
-/// ```sh
-/// echo -n "htmx.config.historyCacheSize = 0" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64
-/// ```
-pub const CSP_VALUE: &str = "default-src 'self'; style-src 'self'; script-src 'self' 'sha256-j+kPDEhZq1pFWf++l0VBlQPpaGZRM+Mm5ClAZ1UOzWc='";
+/// `script-src 'self'` allows only the same-origin `/static/js/htmx.min.js`
+/// bundle; no inline scripts are used.
+pub const CSP_VALUE: &str = "default-src 'self'; style-src 'self'; script-src 'self'";
 
 #[derive(Clone)]
 struct AppState {

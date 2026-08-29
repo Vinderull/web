@@ -7,10 +7,9 @@
     <link rel="alternate" type="application/atom+xml" href="/feed.xml" title="{{ site_name }}">
     {% block head %}{% endblock %}
     <link rel="stylesheet" href="/static/css/main.css">
-    <script src="/static/js/htmx.min.js"></script>
-    <script>htmx.config.historyCacheSize = 0</script>
+    <script src="/static/js/htmx.min.js" integrity="sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc"></script>
 </head>
-<body hx-boost="true">
+<body hx-boost:inherited="true">
     <header>
         <h1><a href="/">{{ site_name }}</a></h1>
         <nav><a href="/tags">Tags</a> · <a href="/about">About</a></nav>
