@@ -138,6 +138,80 @@ async fn static_asset_served() {
 }
 
 #[tokio::test]
+async fn static_htmx_matches_sri_integrity() {
+    // The bytes served, the hash pinned by scripts/update-htmx.sh, and the
+    // integrity attribute on the <script> tag in templates/base.html must be
+    // one and the same, or htmx is broken for every visitor with a CSP/SRI
+    // checking browser. Recompute the constants with the same source the
+    // vendor script uses (unpkg's published integrity field):
+    //   SHA256 (sha256sum) = unpkg /htmx.org@<version>/?meta -> dist/htmx.min.js
+    //   SHA384 (SRI)       = openssl dgst -sha384 -binary static/js/htmx.min.js \
+    //                        | openssl base64 -A
+    // The vendor script prints the SRI value on every run.
+    let (status, _, body) = req(app(), "GET", "/static/js/htmx.min.js", None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let sha256: [u8; 32] = {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(&body).into()
+    };
+    let sha384: [u8; 48] = {
+        use sha2::{Digest, Sha384};
+        Sha384::digest(&body).into()
+    };
+
+    let expected_sha256 = "e484d9171a9db30a39c8f16e3d709d4137f3211c659f8e6125816635033d593f";
+    assert_eq!(
+        hex(&sha256),
+        expected_sha256,
+        "served htmx.min.js must be the pinned release from scripts/update-htmx.sh"
+    );
+
+    let expected_integrity = "BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc";
+    assert_eq!(
+        base64_sha384(&sha384),
+        expected_integrity,
+        "SRI integrity in templates/base.html must match the served htmx.min.js"
+    );
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
+}
+
+fn base64_sha384(bytes: &[u8]) -> String {
+    const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        s.push(B64[(n >> 18) as usize & 63] as char);
+        s.push(B64[(n >> 12) as usize & 63] as char);
+        s.push(if chunk.len() > 1 {
+            B64[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        s.push(if chunk.len() > 2 {
+            B64[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    s
+}
+
+#[tokio::test]
 async fn static_asset_missing_returns_404() {
     let (status, _, _) = req(app(), "GET", "/static/nope.css", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
