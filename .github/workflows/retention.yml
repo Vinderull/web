@@ -1,0 +1,32 @@
+name: GHCR retention
+
+on:
+  schedule:
+    - cron: "0 2 * * 0" # weekly, Sunday 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: Prune old package versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # repo-wide baseline
+      packages: write # delete from GHCR; repo has Admin on `web` since it publishes it
+    env:
+      PKG_NAME: web
+    steps:
+      - uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          package-name: ${{ env.PKG_NAME }}
+          package-type: container
+          # Each release creates 3 GHCR versions: the image plus the cosign
+          # legacy .sig / .att signature artifacts (tagged sha256-<digest>.sig/.att).
+          # Keep 9 = 3 releases x 3 versions, so versions (and signatures) are
+          # never deleted out of step. Non-multiples of 3 would strand the oldest
+          # release's .att while deleting its image and .sig.
+          # Runs under 9 total versions are no-ops (action deletes nothing when
+          # toDelete < 0), so the first executions are safe.
+          min-versions-to-keep: 9
