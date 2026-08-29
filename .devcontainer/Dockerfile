@@ -2,7 +2,7 @@ ARG VARIANT="trixie"
 ARG MUSL_TARGET="x86_64-unknown-linux-musl"
 
 # ---- Dev stage (devcontainer base; toolchain source for builder) ----
-FROM mcr.microsoft.com/devcontainers/rust:2-1-${VARIANT} AS dev
+FROM mcr.microsoft.com/devcontainers/rust:${VARIANT} AS dev
 ARG MUSL_TARGET
 RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && rm -rf /var/lib/apt/lists/* \
