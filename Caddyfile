@@ -1,4 +1,4 @@
-# Replace blog.example.com with your domain.
+# Replace bloginorium.me with your domain.
 # Caddy automatically provisions and renews Let's Encrypt TLS certs.
 
 # Disable the admin API (default localhost:2019). It is unauthenticated and

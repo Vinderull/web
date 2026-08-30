@@ -157,7 +157,7 @@ fn parse_post(slug: &str, content: &str) -> Result<Post> {
 /// (≈200 words/min). Always at least 1 minute.
 fn estimate_reading_time(markdown: &str) -> u32 {
     let words = markdown.split_whitespace().count();
-    (words / 200).max(1) as u32
+    words.div_ceil(200).max(1) as u32
 }
 
 /// Split TOML frontmatter (delimited by `+++`) from markdown body.
@@ -171,14 +171,17 @@ fn split_frontmatter(content: &str) -> (String, &str) {
     let after_open = &content[marker.len()..];
     let after_open = after_open.trim_start_matches(['\r', '\n']);
 
-    match after_open.find(marker) {
-        Some(end) => {
-            let frontmatter = after_open[..end].to_string();
-            let markdown = after_open[end + marker.len()..].trim_start_matches(['\r', '\n']);
-            (frontmatter, markdown)
+    let mut offset = 0;
+    for line in after_open.split('\n') {
+        if line.trim() == marker {
+            let frontmatter = after_open[..offset].to_string();
+            let markdown = after_open[offset + marker.len()..].trim_start_matches(['\r', '\n']);
+            return (frontmatter, markdown);
         }
-        None => (String::new(), content),
+        offset += line.len() + 1;
     }
+
+    (String::new(), content)
 }
 
 // heading levels collected for the ToC when building the body in one pass
@@ -420,6 +423,43 @@ fn format_date(date_str: &str) -> Result<String> {
 mod tests {
     use super::*;
 
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Unique temporary directory (PID + wall-clock nanos + monotonic counter)
+    /// that removes itself on drop: parallel test runs can't collide on a
+    /// shared name, and a failed assertion can't leak the directory.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let unique = format!(
+                "web_test_{}_{}_{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system clock before unix epoch")
+                    .as_nanos(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
+            let dir = std::env::temp_dir().join(unique);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn test_split_frontmatter_with_metadata() {
         let input = "+++\ntitle = \"Test\"\ndate = \"2024-01-15\"\n+++\n# Hello";
@@ -481,21 +521,48 @@ mod tests {
     }
 
     #[test]
+    fn test_split_frontmatter_embedded_pluses() {
+        // `+++` inside a TOML value must not close the frontmatter.
+        let input = "+++\ntitle = \"C+++\"\n+++\nBody";
+        let (fm, md) = split_frontmatter(input);
+        assert!(fm.contains("C+++"));
+        assert_eq!(md, "Body");
+    }
+
+    #[test]
+    fn test_split_frontmatter_crlf() {
+        let input = "+++\r\ntitle = \"Test\"\r\n+++\r\nBody";
+        let (fm, md) = split_frontmatter(input);
+        assert!(fm.contains("title = \"Test\""));
+        assert_eq!(md, "Body");
+    }
+
+    #[test]
     fn test_estimate_reading_time() {
         assert_eq!(
             estimate_reading_time(""),
             1,
             "empty body still counts as 1 min"
         );
-        assert_eq!(estimate_reading_time("word"), 1);
+        assert_eq!(
+            estimate_reading_time("word"),
+            1,
+            "1 word rounds up to 1 min"
+        );
+        let body = "word ".repeat(200);
+        assert_eq!(estimate_reading_time(&body), 1, "200 words = 1 min");
+        let body = "word ".repeat(201);
+        assert_eq!(
+            estimate_reading_time(&body),
+            2,
+            "201 words round up to 2 min"
+        );
         let body = "word ".repeat(400);
         assert_eq!(
             estimate_reading_time(&body),
             2,
             "400 words ≈ 2 min at 200 wpm"
         );
-        let body = "word ".repeat(200);
-        assert_eq!(estimate_reading_time(&body), 1);
     }
 
     #[test]
@@ -658,25 +725,23 @@ mod tests {
 
     #[test]
     fn test_load_all_missing_dir() {
-        let dir = std::env::temp_dir().join("web_test_nonexistent_posts_dir");
-        let _ = std::fs::remove_dir_all(&dir);
-        let posts = load_all(&dir).unwrap();
+        let dir = TempDir::new();
+        let posts = load_all(dir.path()).unwrap();
         assert!(posts.is_empty());
     }
 
     #[test]
     fn test_load_all_empty_dir() {
-        let dir = std::env::temp_dir().join("web_test_empty_posts");
-        std::fs::create_dir_all(dir.join("posts")).unwrap();
-        let posts = load_all(&dir).unwrap();
+        let dir = TempDir::new();
+        std::fs::create_dir_all(dir.path().join("posts")).unwrap();
+        let posts = load_all(dir.path()).unwrap();
         assert!(posts.is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_load_all_sorts_by_date_desc() {
-        let dir = std::env::temp_dir().join("web_test_sort_posts");
-        let posts_subdir = dir.join("posts");
+        let dir = TempDir::new();
+        let posts_subdir = dir.path().join("posts");
         std::fs::create_dir_all(&posts_subdir).unwrap();
 
         std::fs::write(
@@ -691,27 +756,23 @@ mod tests {
         .unwrap();
         // Non-markdown file should be ignored
         std::fs::write(posts_subdir.join("notes.txt"), "ignore me").unwrap();
-
-        let posts = load_all(&dir).unwrap();
+        let posts = load_all(dir.path()).unwrap();
         assert_eq!(posts.len(), 2);
         assert_eq!(posts[0].slug, "newer", "newest post first");
         assert_eq!(posts[1].slug, "older");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_load_pages_missing_dir_returns_empty() {
-        let dir = std::env::temp_dir().join("web_test_nonexistent_pages");
-        let _ = std::fs::remove_dir_all(&dir);
-        let pages = load_pages(&dir).unwrap();
+        let dir = TempDir::new();
+        let pages = load_pages(dir.path()).unwrap();
         assert!(pages.is_empty());
     }
 
     #[test]
     fn test_load_pages_parses_markdown_and_ignores_non_md() {
-        let dir = std::env::temp_dir().join("web_test_pages");
-        let pages_subdir = dir.join("pages");
+        let dir = TempDir::new();
+        let pages_subdir = dir.path().join("pages");
         std::fs::create_dir_all(&pages_subdir).unwrap();
 
         std::fs::write(
@@ -720,13 +781,10 @@ mod tests {
         )
         .unwrap();
         std::fs::write(pages_subdir.join("readme.txt"), "ignore").unwrap();
-
-        let pages = load_pages(&dir).unwrap();
+        let pages = load_pages(dir.path()).unwrap();
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].slug, "about");
         assert_eq!(pages[0].title, "About Me");
         assert!(pages[0].html.contains("<strong>world</strong>"));
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

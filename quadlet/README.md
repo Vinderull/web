@@ -1,15 +1,15 @@
 # Quadlet deployment
 
-Translates `docker-compose.yml` into systemd-managed Podman units,
-grouping the blog app and Caddy reverse proxy in a single **pod**.
+Systemd-managed Podman units grouping the blog app and Caddy reverse
+proxy in a single **pod**.
 
 ## Units
-| File | Replaces |
+| File | Purpose |
 |------|----------|
-| `web.pod` | shared network namespace + published ports 80/443 |
-| `blog.container` | `blog` service |
-| `caddy.container` | `caddy` service |
-| `caddy-data.volume` / `caddy-config.volume` | named `volumes:` |
+| `web.pod` | shared network namespace for the pod; publishes ports 80/443 |
+| `blog.container` | the blog app |
+| `caddy.container` | the Caddy reverse proxy |
+| `caddy-data.volume` / `caddy-config.volume` | named volumes for Caddy's data and config |
 
 The `web.network` unit from the non-pod variant is gone — a pod provides its
 own internal network, and the two containers reach each other on `127.0.0.1`.
@@ -91,19 +91,18 @@ journalctl _UID=2000 -b | grep -iE 'caddy|blog|update'
 sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 ```
 
-## Notes / deviations from compose
-- **Image source**: compose `build:` is replaced by a registry pull. CI pushes the
+## Design notes
+- **Image source**: the units reference a pre-built image rather than building one. CI pushes the
   `runtime` image to `ghcr.io/<owner>/web:latest` (plus a versioned `:<tag>`,
   keyless-signed with cosign) when you publish a GitHub Release (against a `v*`
   tag); `blog.container`
   pulls it via `Update=registry`, so a deploy is just
   `systemctl --user restart blog`.
-- **`expose:`**: omitted — it's informational in compose; reachability comes from
-  the shared pod localhost namespace.
-- **`depends_on`**: modeled with `Requires=`/`After=`/`Before=` ordering. Caddy
-  additionally self-gates via `health_path /healthz` (see below) so it only routes
-  to the blog once the app is actually answering.
-- **`restart: unless-stopped`** → `Restart=always` (systemd still honors a manual
+- **Startup ordering**: `Requires=`/`After=`/`Before=` ordering makes Caddy wait
+  for the blog, and the blog wait for the pod. Caddy additionally self-gates via
+  `health_path /healthz` (see below) so it only routes to the blog once the app
+  is actually answering.
+- **Restart policy**: `Restart=always` (systemd still honors a manual
   `systemctl stop`).
 - **ReadOnly root** (`ReadOnly=true`) on both containers — root filesystems are
   read-only; Caddy writes only to the `/data` and `/config` named volumes, the
@@ -128,7 +127,7 @@ data payload.
 server path, not a repo checkout path), which the Ignition config writes.
 
 ### 1. Set your domain
-Edit `Caddyfile` and replace `blog.example.com` with your domain. The domain's
+Edit `Caddyfile` and replace `bloginorium.me` with your domain. The domain's
 DNS A/AAAA records must point at the VPS (Caddy completes an HTTP-01 challenge,
 so port 80 must be reachable from the public internet).
 

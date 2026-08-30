@@ -6,12 +6,12 @@ Personal blog built with Rust, axum, and htmx.
 
 - **axum** 0.8 — HTTP server
 - **askama** 0.16 — compile-time HTML templates
-- **htmx** 2.0 — progressive enhancement (SPA-like navigation via `hx-boost`)
+- **htmx** 4.0.0 — progressive enhancement (SPA-like navigation via `hx-boost`)
 - **pulldown-cmark** — Markdown rendering
 - **syntect** — syntax highlighting at load time
 - **ammonia** — HTML sanitization
 - **landlock** — Linux kernel sandboxing (filesystem + network restrictions)
-- **tower-http** — static file serving, request tracing
+- **tower-http** — static file serving
 
 ## Features
 
@@ -167,4 +167,3 @@ steps in one shot — it builds the `runtime` image and runs it loopback-only on
 | `BIND_ADDR`  | `0.0.0.0:3000`| Listen address            |
 | `CONTENT_DIR`| `content`     | Path to posts directory   |
 | `STATIC_DIR` | `static`      | Path to static assets     |
-| `RUST_LOG`   | `info`        | Tracing filter            |
