@@ -44,6 +44,11 @@ pub const SITE_AUTHOR: &str = "Ryan Dufour";
 /// bundle; no inline scripts are used.
 pub const CSP_VALUE: &str = "default-src 'self'; style-src 'self'; script-src 'self'";
 
+/// Permissions-Policy header value applied to every HTML response.
+/// The site uses none of these browser capabilities, so they are denied to
+/// every origin.
+pub const PERMISSIONS_POLICY_VALUE: &str = "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), document-domain=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()";
+
 #[derive(Clone)]
 struct AppState {
     index_html: Bytes,
@@ -215,12 +220,8 @@ pub fn build_app(
         .with_state(state))
 }
 
-async fn index(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
-    Ok(cached_html(
-        headers,
-        state.index_html.clone(),
-        state.index_etag.clone(),
-    ))
+async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    cached_html(headers, state.index_html.clone(), state.index_etag.clone())
 }
 
 async fn post(
@@ -245,9 +246,7 @@ async fn teapot() -> Response {
     // Easter egg. Short-circuits before any real route; deliberately no
     // caching/state so it stays zero-cost and invisible to real traffic.
     let mut resp = Response::new(Body::from(
-        "418 I'm a teapot: \n \n
-            The requested entity body is short and stout.\n
-            Tip me over and pour me out.\n",
+        "418 I'm a teapot:\n\nThe requested entity body is short and stout.\nTip me over and pour me out.\n",
     ));
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -273,9 +272,18 @@ async fn robots_txt() -> Response {
     resp
 }
 
-async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, StatusCode> {
+async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if etag_matches(&headers, &state.feed_etag) {
-        return Ok(StatusCode::NOT_MODIFIED.into_response());
+        // 304 mirrors the selected representation's metadata (ETag +
+        // Cache-Control) with an empty body and no Content-Type.
+        let mut resp = StatusCode::NOT_MODIFIED.into_response();
+        resp.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
+        );
+        resp.headers_mut()
+            .insert(header::ETAG, state.feed_etag.clone());
+        return resp;
     }
     let mut resp = Response::new(Body::from(state.feed_xml.clone()));
     resp.headers_mut().insert(
@@ -288,18 +296,15 @@ async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Result<Respo
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/atom+xml; charset=utf-8"),
     );
-    Ok(resp)
+    resp
 }
 
-async fn tags_index(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Response, StatusCode> {
-    Ok(cached_html(
+async fn tags_index(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    cached_html(
         headers,
         state.tags_index_html.clone(),
         state.tags_index_etag.clone(),
-    ))
+    )
 }
 
 async fn tag(
@@ -411,11 +416,13 @@ async fn search(
 /// Truncate and trim a search query, returning the empty string when the
 /// result is blank — a blank query means "return all posts."
 fn truncate_query(raw: &str) -> String {
-    raw.chars()
-        .take(MAX_QUERY_LEN)
-        .collect::<String>()
-        .trim()
-        .to_string()
+    // Cut to the first MAX_QUERY_LEN chars on a char boundary, trim the
+    // borrowed slice, then do the single to_owned allocation.
+    let end = raw
+        .char_indices()
+        .nth(MAX_QUERY_LEN)
+        .map_or(raw.len(), |(i, _)| i);
+    raw[..end].trim().to_string()
 }
 
 /// Build the per-post lowercased search haystack (title + description + body),
@@ -438,9 +445,9 @@ fn build_haystacks(posts: &[posts::Post]) -> Vec<String> {
 
 /// Case-insensitive substring match on the pre-lowercased title/description/
 /// body haystack. `haystacks` is index-aligned with `posts` and built once at
-/// boot. A blank query returns every post. The caller is responsible for
-/// truncation and trimming; the query here is already a trimmed, lowercased,
-/// length-bounded string.
+/// boot. The query is lowercased internally, so any case matches. A blank
+/// query returns every post. The caller is responsible for truncation and
+/// trimming; the query here is already a trimmed, length-bounded string.
 fn search_posts_with<'a>(
     posts: &'a [posts::Post],
     haystacks: &[String],
@@ -459,21 +466,57 @@ fn search_posts_with<'a>(
 }
 
 /// True when any ETag in the request's `If-None-Match` header matches `etag`.
+///
+/// Follows RFC 9110 §13.1.2 GET/HEAD semantics: `*` matches any current
+/// representation (every caller passes the ETag of an existing one), and
+/// entity-tags are compared weakly, so `W/"tag"` equals `"tag"`. Members are
+/// parsed conservatively — a malformed token never matches. Allocation-free.
 fn etag_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
+    let Some(server_opaque) = etag.to_str().ok().and_then(opaque_of) else {
+        return false;
+    };
     headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|inm| {
-            inm.split(',')
-                .any(|t| t.trim() == etag.to_str().unwrap_or(""))
+            inm.split(',').any(|member| {
+                let member = member.trim();
+                // `*` is "any current representation" (RFC 9110 §13.1.2); the
+                // header only exists because a representation does.
+                member == "*" || opaque_of(member) == Some(server_opaque)
+            })
         })
+}
+
+/// The opaque-tag of a well-formed entity-tag (`"…"` or `W/"…"`), or `None`
+/// when the tag is malformed. Dropping the `W/` prefix is exactly the weak
+/// comparison RFC 9110 §8.8.3.2 requires for `If-None-Match`.
+fn opaque_of(tag: &str) -> Option<&str> {
+    let body = tag.strip_prefix("W/").unwrap_or(tag);
+    let opaque = body.strip_prefix('"')?.strip_suffix('"')?;
+    opaque.bytes().all(is_etagc).then_some(opaque)
+}
+
+/// One `etagc` character (RFC 9110 §8.8.3): `!`, `#`–`~`, or obs-text.
+/// Quotes, spaces, controls, and DEL are excluded, so an embedded quote or
+/// space marks the tag malformed rather than a near-match.
+fn is_etagc(b: u8) -> bool {
+    b == 0x21 || (0x23..=0x7E).contains(&b) || b >= 0x80
 }
 
 /// Build a weakly-caching HTML response: 304 on matching `If-None-Match`,
 /// otherwise the body with `Cache-Control` + `ETag` headers.
 fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
     if etag_matches(&headers, &etag) {
-        return StatusCode::NOT_MODIFIED.into_response();
+        // 304 mirrors the selected representation's metadata (ETag +
+        // Cache-Control) with an empty body and no Content-Type.
+        let mut resp = StatusCode::NOT_MODIFIED.into_response();
+        resp.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
+        );
+        resp.headers_mut().insert(header::ETAG, etag);
+        return resp;
     }
     let mut resp = Response::new(Body::from(body));
     resp.headers_mut().insert(
@@ -510,9 +553,7 @@ fn apply_security_headers(resp: &mut Response) {
     );
     resp.headers_mut().insert(
         header::HeaderName::from_static("permissions-policy"),
-        HeaderValue::from_static(
-            "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), document-domain=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()",
-        ),
+        HeaderValue::from_static(PERMISSIONS_POLICY_VALUE),
     );
 }
 
@@ -564,6 +605,14 @@ mod tests {
             HeaderValue::from_static("\"abc\""),
         );
         assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+        // 304 mirrors the cached metadata with an empty body: same ETag and
+        // Cache-Control, no Content-Type.
+        assert_eq!(resp.headers().get(header::ETAG).unwrap(), "\"abc\"");
+        assert_eq!(
+            resp.headers().get(header::CACHE_CONTROL).unwrap(),
+            "public, max-age=43200, s-maxage=43200, immutable"
+        );
+        assert!(resp.headers().get(header::CONTENT_TYPE).is_none());
     }
 
     #[test]
@@ -612,6 +661,62 @@ mod tests {
     fn etag_stable_for_same_input() {
         assert_eq!(etag_for(b"hello"), etag_for(b"hello"));
         assert_ne!(etag_for(b"hello"), etag_for(b"world"));
+    }
+
+    #[test]
+    fn etag_matches_wildcard_and_weak_forms() {
+        let strong = HeaderValue::from_static("\"abc\"");
+        // `*` matches any current representation (RFC 9110 §13.1.2).
+        assert!(etag_matches(&req_with_inm(Some("*")), &strong));
+        // Weak comparison: W/"tag" equals "tag".
+        assert!(etag_matches(&req_with_inm(Some("W/\"abc\"")), &strong));
+        // Wildcard/weak members work inside a CSV list too.
+        assert!(etag_matches(
+            &req_with_inm(Some("\"other\", W/\"abc\"")),
+            &strong
+        ));
+        assert!(etag_matches(&req_with_inm(Some("\"other\", *")), &strong));
+    }
+
+    #[test]
+    fn etag_matches_rejects_nonmatching_and_malformed() {
+        let strong = HeaderValue::from_static("\"abc\"");
+        assert!(!etag_matches(&req_with_inm(Some("\"xyz\"")), &strong));
+        // Substring and near-miss tokens are not matches.
+        assert!(!etag_matches(&req_with_inm(Some("\"ab\"")), &strong));
+        assert!(!etag_matches(&req_with_inm(Some("abc")), &strong));
+        assert!(!etag_matches(&req_with_inm(Some("abc\"")), &strong));
+        assert!(!etag_matches(&req_with_inm(Some("\"abc\"x")), &strong));
+        assert!(!etag_matches(&req_with_inm(Some("W/abc")), &strong));
+        // "W/" is case-sensitive (RFC 9110 §8.8.3.1); lowercase is malformed.
+        assert!(!etag_matches(&req_with_inm(Some("w/\"abc\"")), &strong));
+        // Embedded whitespace is not an etagc.
+        assert!(!etag_matches(&req_with_inm(Some("\"ab c\"")), &strong));
+        // Quoted "*" is an entity-tag, not the wildcard; "*x" is not "*".
+        assert!(!etag_matches(&req_with_inm(Some("\"*\"")), &strong));
+        assert!(!etag_matches(&req_with_inm(Some("*x")), &strong));
+        // Empty header and absent header never match.
+        assert!(!etag_matches(&req_with_inm(Some("")), &strong));
+        assert!(!etag_matches(&req_with_inm(None), &strong));
+    }
+
+    #[test]
+    fn truncate_query_caps_at_char_boundary() {
+        // The cap counts chars, not bytes: a multi-byte cut must land on a
+        // char boundary and keep exactly MAX_QUERY_LEN chars.
+        let wide = "é".repeat(MAX_QUERY_LEN + 3);
+        let capped = truncate_query(&wide);
+        assert_eq!(capped.chars().count(), MAX_QUERY_LEN);
+        assert_eq!(capped, "é".repeat(MAX_QUERY_LEN));
+        // Exactly MAX_QUERY_LEN chars pass through whole.
+        let exact = "x".repeat(MAX_QUERY_LEN);
+        assert_eq!(truncate_query(&exact), exact);
+        // Trimming still happens after capping.
+        assert_eq!(
+            truncate_query(&format!("  {}", "y".repeat(MAX_QUERY_LEN))),
+            "y".repeat(MAX_QUERY_LEN - 2)
+        );
+        assert_eq!(truncate_query("   "), "");
     }
 
     #[test]
@@ -882,5 +987,53 @@ mod tests {
             body,
             "User-agent: *\nDisallow: /search\nDisallow: /teapot\n"
         );
+    }
+
+    #[tokio::test]
+    async fn feed_304_echoes_etag_and_cache_control() {
+        let app = build_app(Vec::new(), None, Path::new("static")).unwrap();
+        let first = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/feed.xml")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let etag = first
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/feed.xml")
+                    .header(header::IF_NONE_MATCH, etag.as_str())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            resp.headers().get(header::CACHE_CONTROL).unwrap(),
+            "public, max-age=43200, s-maxage=43200, immutable"
+        );
+        assert_eq!(
+            resp.headers().get(header::ETAG).unwrap().to_str().unwrap(),
+            etag.as_str(),
+            "304 must echo the matching ETag"
+        );
+        assert!(
+            resp.headers().get(header::CONTENT_TYPE).is_none(),
+            "304 must not carry Content-Type"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.is_empty(), "304 must have no body");
     }
 }

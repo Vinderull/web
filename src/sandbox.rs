@@ -20,8 +20,14 @@ mod linux {
         PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, Scope,
     };
 
+    /// The newest Landlock ABI the sandbox requests (V9): basic filesystem rights
+    /// plus truncate, ioctl_dev, the network access controls, and the scope
+    /// domains. Kernels that only support an older ABI enforce a downgraded
+    /// subset of these protections.
+    const REQUESTED_ABI: ABI = ABI::V9;
+
     pub fn apply(static_dir: &Path) -> Result<()> {
-        let abi = ABI::V9;
+        let abi = REQUESTED_ABI;
         let access_all = AccessFs::from_all(abi);
         let access_read = AccessFs::from_read(abi);
 
@@ -51,6 +57,9 @@ mod linux {
                 if status.ruleset == RulesetStatus::NotEnforced {
                     bail!("Landlock ruleset could not be enforced despite kernel support");
                 }
+                if let Some(warning) = downgrade_warning(*effective_abi) {
+                    eprintln!("{}", warning);
+                }
                 println!(
                     "Landlock sandbox enforced (effective ABI V{})",
                     *effective_abi as u32
@@ -62,6 +71,79 @@ mod linux {
         }
 
         Ok(())
+    }
+
+    /// Compose the stderr warning shown when the kernel enforces an ABI lower
+    /// than the requested [`REQUESTED_ABI`], or `None` on full enforcement.
+    ///
+    /// Startup continues either way; the warning exists so an operator notices
+    /// that the requested protections were downgraded and that newer
+    /// filesystem, network, or scope controls may be unavailable.
+    fn downgrade_warning(effective_abi: ABI) -> Option<String> {
+        if effective_abi >= REQUESTED_ABI {
+            return None;
+        }
+        Some(format!(
+            "Warning: Landlock sandbox enforced with effective ABI V{}, but ABI V{} was \
+             requested: protections were downgraded, so newer filesystem, network, or \
+             scope controls may be unavailable",
+            effective_abi as u32, REQUESTED_ABI as u32,
+        ))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn full_v9_enforcement_warns_nothing() {
+            assert_eq!(downgrade_warning(ABI::V9), None);
+        }
+
+        #[test]
+        fn downgraded_abi_warns_with_versions_and_consequences() {
+            let warning = downgrade_warning(ABI::V6).expect("downgrade must warn");
+            assert!(
+                warning.contains("ABI V6"),
+                "reports the effective ABI: {warning}"
+            );
+            assert!(
+                warning.contains("ABI V9"),
+                "reports the requested ABI: {warning}"
+            );
+            assert!(
+                warning.contains("downgraded"),
+                "labels the downgrade: {warning}"
+            );
+            assert!(
+                warning.contains("filesystem"),
+                "mentions filesystem controls: {warning}"
+            );
+            assert!(
+                warning.contains("network"),
+                "mentions network controls: {warning}"
+            );
+            assert!(
+                warning.contains("scope"),
+                "mentions scope controls: {warning}"
+            );
+        }
+
+        #[test]
+        fn every_lower_abi_warns() {
+            for abi in [
+                ABI::V1,
+                ABI::V2,
+                ABI::V3,
+                ABI::V4,
+                ABI::V5,
+                ABI::V6,
+                ABI::V7,
+                ABI::V8,
+            ] {
+                assert!(downgrade_warning(abi).is_some(), "{abi:?} must warn");
+            }
+        }
     }
 }
 

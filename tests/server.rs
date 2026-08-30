@@ -5,7 +5,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use web::{build_app, posts};
+use web::{PERMISSIONS_POLICY_VALUE, build_app, posts};
 
 /// A small fixed corpus so the tests don't depend on repo content/ posts.
 fn test_corpus() -> Vec<posts::Post> {
@@ -51,15 +51,22 @@ fn app() -> Router {
 
 /// Drive a request through the router in-process (no TCP socket) and return
 /// status, headers, and collected body bytes.
+///
+/// `extra` lets a caller send one additional header — e.g. htmx's
+/// `HX-Request: true` to request the bare search fragment.
 async fn req(
     app: Router,
     method: &str,
     uri: &str,
     inm: Option<&str>,
+    extra: Option<(&str, &str)>,
 ) -> (StatusCode, HeaderMap, Vec<u8>) {
     let mut builder = Request::builder().method(method).uri(uri);
     if let Some(e) = inm {
         builder = builder.header(header::IF_NONE_MATCH, e);
+    }
+    if let Some((name, value)) = extra {
+        builder = builder.header(name, value);
     }
     let resp = app
         .oneshot(builder.body(Body::empty()).unwrap())
@@ -72,7 +79,7 @@ async fn req(
 
 #[tokio::test]
 async fn index_returns_200_with_cache_headers() {
-    let (status, headers, body) = req(app(), "GET", "/", None).await;
+    let (status, headers, body) = req(app(), "GET", "/", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
@@ -86,21 +93,19 @@ async fn index_returns_200_with_cache_headers() {
 
 #[tokio::test]
 async fn index_304_on_matching_etag() {
-    let (_, headers, _) = req(app(), "GET", "/", None).await;
+    let (_, headers, _) = req(app(), "GET", "/", None, None).await;
     let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
-    let (status, _, body) = req(app(), "GET", "/", Some(etag)).await;
+    let (status, _, body) = req(app(), "GET", "/", Some(etag), None).await;
     assert_eq!(status, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty(), "304 must have no body");
 }
 
 #[tokio::test]
 async fn post_page_200_for_known_slug() {
-    let posts = test_corpus();
-    let slug = match posts.first() {
-        Some(p) => &p.slug,
-        None => return, // empty corpus
-    };
-    let (status, headers, body) = req(app(), "GET", &format!("/posts/{slug}"), None).await;
+    // The "second-post" fixture carries a precomputed ToC, so this request
+    // exercises the ToC nav rather than a bare article.
+    let slug = "second-post";
+    let (status, headers, body) = req(app(), "GET", &format!("/posts/{slug}"), None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(headers.contains_key(header::ETAG));
     let body = String::from_utf8(body).unwrap();
@@ -108,31 +113,33 @@ async fn post_page_200_for_known_slug() {
         body.contains("<article>"),
         "post should render article wrapper"
     );
-    // The "second-post" fixture has a ToC, so the precomputed nav should render.
-    if posts.iter().any(|p| p.slug == *slug && !p.toc.is_empty()) {
-        assert!(
-            body.contains("Table of Contents") && body.contains("class=\"toc\""),
-            "post page should include the ToC nav"
-        );
-    }
+    assert!(
+        body.contains("Table of Contents") && body.contains("class=\"toc\""),
+        "post page should include the ToC nav"
+    );
 }
 
 #[tokio::test]
 async fn post_404_for_unknown_slug() {
-    let (status, _, _) = req(app(), "GET", "/posts/does-not-exist", None).await;
+    let (status, headers, _) = req(app(), "GET", "/posts/does-not-exist", None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "no-store",
+        "custom 404 pages must never be cached"
+    );
 }
 
 #[tokio::test]
 async fn healthz_returns_ok() {
-    let (status, _, body) = req(app(), "GET", "/healthz", None).await;
+    let (status, _, body) = req(app(), "GET", "/healthz", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"ok");
 }
 
 #[tokio::test]
 async fn static_asset_served() {
-    let (status, _, body) = req(app(), "GET", "/static/css/main.css", None).await;
+    let (status, _, body) = req(app(), "GET", "/static/css/main.css", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(!body.is_empty(), "css should have content");
 }
@@ -148,7 +155,7 @@ async fn static_htmx_matches_sri_integrity() {
     //   SHA384 (SRI)       = openssl dgst -sha384 -binary static/js/htmx.min.js \
     //                        | openssl base64 -A
     // The vendor script prints the SRI value on every run.
-    let (status, _, body) = req(app(), "GET", "/static/js/htmx.min.js", None).await;
+    let (status, _, body) = req(app(), "GET", "/static/js/htmx.min.js", None, None).await;
     assert_eq!(status, StatusCode::OK);
 
     let sha256: [u8; 32] = {
@@ -172,6 +179,15 @@ async fn static_htmx_matches_sri_integrity() {
         base64_sha384(&sha384),
         expected_integrity,
         "SRI integrity in templates/base.html must match the served htmx.min.js"
+    );
+
+    // The <script> tag in the layout must carry the value SRI-enforcing
+    // browsers validate the served bytes against.
+    let base = std::fs::read_to_string("templates/base.html")
+        .expect("templates/base.html must exist next to the tests");
+    assert!(
+        base.contains(&format!("integrity=\"sha384-{expected_integrity}\"")),
+        "templates/base.html must pin the served htmx.min.js integrity value"
     );
 }
 
@@ -213,13 +229,13 @@ fn base64_sha384(bytes: &[u8]) -> String {
 
 #[tokio::test]
 async fn static_asset_missing_returns_404() {
-    let (status, _, _) = req(app(), "GET", "/static/nope.css", None).await;
+    let (status, _, _) = req(app(), "GET", "/static/nope.css", None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn index_sets_security_headers() {
-    let (_, headers, _) = req(app(), "GET", "/", None).await;
+    let (_, headers, _) = req(app(), "GET", "/", None, None).await;
     assert_eq!(
         headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
         "nosniff"
@@ -233,21 +249,21 @@ async fn index_sets_security_headers() {
         headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
         web::CSP_VALUE,
     );
+    assert_eq!(
+        headers.get("permissions-policy").unwrap(),
+        PERMISSIONS_POLICY_VALUE,
+    );
 }
 
 #[tokio::test]
 async fn post_page_304_on_matching_etag() {
-    let posts = test_corpus();
-    let slug = match posts.first() {
-        Some(p) => &p.slug,
-        None => return,
-    };
+    let slug = "hello-world";
     let app = app();
     let uri = format!("/posts/{slug}");
-    let (status, headers, _) = req(app.clone(), "GET", &uri, None).await;
+    let (status, headers, _) = req(app.clone(), "GET", &uri, None, None).await;
     assert_eq!(status, StatusCode::OK);
     let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
-    let (status, _, body) = req(app, "GET", &uri, Some(etag)).await;
+    let (status, _, body) = req(app, "GET", &uri, Some(etag), None).await;
     assert_eq!(status, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty());
 }
@@ -255,23 +271,10 @@ async fn post_page_304_on_matching_etag() {
 // "cambodian" appears only in the "hello-world" fixture's body, isolating it.
 const QUERY: &str = "/search?q=cambodian";
 
-async fn search_req(hx: bool, uri: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
-    let mut builder = Request::builder().method("GET").uri(uri);
-    if hx {
-        builder = builder.header("HX-Request", "true");
-    }
-    let resp = app()
-        .oneshot(builder.body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    let (parts, body) = resp.into_parts();
-    let bytes = body.collect().await.unwrap().to_bytes();
-    (parts.status, parts.headers, bytes.to_vec())
-}
-
 #[tokio::test]
 async fn search_returns_fragment_for_htmx() {
-    let (status, headers, body) = search_req(true, QUERY).await;
+    let (status, headers, body) =
+        req(app(), "GET", QUERY, None, Some(("HX-Request", "true"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
@@ -288,7 +291,7 @@ async fn search_returns_fragment_for_htmx() {
 
 #[tokio::test]
 async fn search_returns_full_document_for_plain_navigation() {
-    let (status, _, body) = search_req(false, QUERY).await;
+    let (status, _, body) = req(app(), "GET", QUERY, None, None).await;
     assert_eq!(status, StatusCode::OK);
     let body = String::from_utf8(body).unwrap();
     assert!(
@@ -308,7 +311,7 @@ async fn search_returns_full_document_for_plain_navigation() {
 
 #[tokio::test]
 async fn search_sets_security_headers() {
-    let (_, headers, _) = req(app(), "GET", "/search?q=hello", None).await;
+    let (_, headers, _) = req(app(), "GET", "/search?q=hello", None, None).await;
     assert_eq!(
         headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
         "nosniff"
@@ -331,10 +334,11 @@ async fn search_sets_security_headers() {
 #[tokio::test]
 async fn search_with_empty_query_returns_all_posts() {
     let posts = test_corpus();
-    if posts.is_empty() {
-        return; // empty corpus
-    }
-    let (status, _, body) = req(app(), "GET", "/search?q=", None).await;
+    assert!(
+        !posts.is_empty(),
+        "fixed test corpus must provide posts for the empty-query search"
+    );
+    let (status, _, body) = req(app(), "GET", "/search?q=", None, None).await;
     assert_eq!(status, StatusCode::OK);
     let body = String::from_utf8(body).unwrap();
     for p in &posts {
@@ -348,7 +352,7 @@ async fn search_with_empty_query_returns_all_posts() {
 
 #[tokio::test]
 async fn search_with_no_match_returns_empty_state() {
-    let (status, _, body) = req(app(), "GET", "/search?q=zzzznomatch", None).await;
+    let (status, _, body) = req(app(), "GET", "/search?q=zzzznomatch", None, None).await;
     assert_eq!(status, StatusCode::OK);
     let body = String::from_utf8(body).unwrap();
     assert!(
@@ -367,7 +371,7 @@ async fn tags_index_lists_all_tags() {
         }
         set.into_iter().collect()
     };
-    let (status, _, body) = req(app(), "GET", "/tags", None).await;
+    let (status, _, body) = req(app(), "GET", "/tags", None, None).await;
     assert_eq!(status, StatusCode::OK);
     let body = String::from_utf8(body).unwrap();
     for t in tags {
@@ -381,11 +385,13 @@ async fn tags_index_lists_all_tags() {
 #[tokio::test]
 async fn tag_page_lists_posts_for_tag() {
     let posts = test_corpus();
-    let tag = match posts.iter().flat_map(|p| &p.tags).next() {
-        Some(t) => t.clone(),
-        None => return, // no tagged content
-    };
-    let (status, headers, body) = req(app(), "GET", &format!("/tags/{tag}"), None).await;
+    let tag = posts
+        .iter()
+        .flat_map(|p| &p.tags)
+        .next()
+        .expect("fixed test corpus must include tagged posts")
+        .clone();
+    let (status, headers, body) = req(app(), "GET", &format!("/tags/{tag}"), None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(headers.contains_key(header::ETAG));
     let body = String::from_utf8(body).unwrap();
@@ -404,18 +410,23 @@ async fn tag_page_lists_posts_for_tag() {
 
 #[tokio::test]
 async fn tag_page_404_for_unknown_tag() {
-    let (status, _, _) = req(app(), "GET", "/tags/does-not-exist", None).await;
+    let (status, headers, _) = req(app(), "GET", "/tags/does-not-exist", None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "no-store",
+        "custom 404 pages must never be cached"
+    );
 }
 
 #[tokio::test]
 async fn post_page_shows_tags() {
     let posts = test_corpus();
-    let post = match posts.iter().find(|p| !p.tags.is_empty()) {
-        Some(p) => p,
-        None => return, // no tagged content
-    };
-    let (status, _, body) = req(app(), "GET", &format!("/posts/{}", post.slug), None).await;
+    let post = posts
+        .iter()
+        .find(|p| !p.tags.is_empty())
+        .expect("fixed test corpus must include a tagged post");
+    let (status, _, body) = req(app(), "GET", &format!("/posts/{}", post.slug), None, None).await;
     assert_eq!(status, StatusCode::OK);
     let body = String::from_utf8(body).unwrap();
     for t in &post.tags {
@@ -428,7 +439,7 @@ async fn post_page_shows_tags() {
 
 #[tokio::test]
 async fn about_page_200_with_cache_headers() {
-    let (status, headers, body) = req(app(), "GET", "/about", None).await;
+    let (status, headers, body) = req(app(), "GET", "/about", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CACHE_CONTROL).unwrap(),
@@ -445,16 +456,16 @@ async fn about_page_200_with_cache_headers() {
 
 #[tokio::test]
 async fn about_page_304_on_matching_etag() {
-    let (_, headers, _) = req(app(), "GET", "/about", None).await;
+    let (_, headers, _) = req(app(), "GET", "/about", None, None).await;
     let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
-    let (status, _, body) = req(app(), "GET", "/about", Some(etag)).await;
+    let (status, _, body) = req(app(), "GET", "/about", Some(etag), None).await;
     assert_eq!(status, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty(), "304 must have no body");
 }
 
 #[tokio::test]
 async fn about_link_present_in_header() {
-    let (_, _, body) = req(app(), "GET", "/", None).await;
+    let (_, _, body) = req(app(), "GET", "/", None, None).await;
     let body = String::from_utf8(body).unwrap();
     assert!(
         body.contains(r#"<a href="/about">About</a>"#),
@@ -464,7 +475,7 @@ async fn about_link_present_in_header() {
 
 #[tokio::test]
 async fn teapot_returns_418_with_poem() {
-    let (status, headers, body) = req(app(), "GET", "/teapot", None).await;
+    let (status, headers, body) = req(app(), "GET", "/teapot", None, None).await;
     assert_eq!(status, StatusCode::IM_A_TEAPOT);
     assert_eq!(
         headers.get(header::CONTENT_TYPE).unwrap(),
@@ -477,7 +488,7 @@ async fn teapot_returns_418_with_poem() {
 
 #[tokio::test]
 async fn feed_returns_atom_xml_with_correct_content_type() {
-    let (status, headers, body) = req(app(), "GET", "/feed.xml", None).await;
+    let (status, headers, body) = req(app(), "GET", "/feed.xml", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers.get(header::CONTENT_TYPE).unwrap(),
@@ -515,7 +526,7 @@ async fn feed_returns_atom_xml_with_correct_content_type() {
 
 #[tokio::test]
 async fn feed_redirect_to_feed_xml() {
-    let (status, headers, body) = req(app(), "GET", "/feed", None).await;
+    let (status, headers, body) = req(app(), "GET", "/feed", None, None).await;
     assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
     assert_eq!(headers.get(header::LOCATION).unwrap(), "/feed.xml");
     assert!(body.is_empty(), "redirect body should be empty");
@@ -523,9 +534,9 @@ async fn feed_redirect_to_feed_xml() {
 
 #[tokio::test]
 async fn feed_304_on_matching_etag() {
-    let (_, headers, _) = req(app(), "GET", "/feed.xml", None).await;
+    let (_, headers, _) = req(app(), "GET", "/feed.xml", None, None).await;
     let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
-    let (status, _, body) = req(app(), "GET", "/feed.xml", Some(etag)).await;
+    let (status, _, body) = req(app(), "GET", "/feed.xml", Some(etag), None).await;
     assert_eq!(status, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty(), "304 must have no body");
 }

@@ -18,7 +18,7 @@ production by Caddy for TLS. Site name/URL are compile-time constants
                                      │ HTTP (pod localhost)
             ┌────────────────────────▼────────────────────────┐
             │  axum 0.8 server  (scratch, UID 65532)           │
-            │  Router · AppState · TraceLayer                  │
+            │  Router · AppState                               │
             │  ┌───────────┬───────────┬──────────┬────────┐  │
             │  │ /  /about │/posts/{s}│/tags /tags/{t}      │  │
             │  │ /search   │/feed.xml │ /teapot  │/healthz │  │
@@ -115,8 +115,6 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
 | `GET /static/*` | `ServeDir` | files streamed from `static/` (tower-http `fs`) |
 | (fallback) | `not_found` | pre-rendered 404 page |
 
-- `TraceLayer::new_for_http()` (tower-http `trace`) wraps every request in a
-  tracing span for structured per-request logging.
 - All mutable work (markdown → HTML, Askama rendering, feed XML generation)
   happens in `build_app()` before the router is built. The request path only
   does hashmap lookups and ETag comparisons.
@@ -127,7 +125,7 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
   `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`,
   `Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'`.
 
-### 5. Frontend layer — htmx 2.0 + CSS (`static/`)
+### 5. Frontend layer — htmx 4.0.0 + CSS (`static/`)
 - `htmx.min.js` is **self-hosted** (vendored, not a CDN) and loaded on every
   page. `hx-boost="true"` on `<body>` upgrades same-origin links/forms into
   background fetches that swap `<body>` — giving SPA-like navigation without a
@@ -153,17 +151,15 @@ the process with a Linux landlock ruleset (ABI V9, `BestEffort` compatibility):
 
 ### 7. Process / startup layer (`src/main.rs`, `src/config.rs`)
 Startup order is deliberate (each step justifies the next):
-1. **Tracing init** — `tracing-subscriber` fmt, `EnvFilter` from `RUST_LOG`
-   (default `info`).
-2. **Config** — `Config::from_env()` reads `BIND_ADDR` (`0.0.0.0:3000`),
+1. **Config** — `Config::from_env()` reads `BIND_ADDR` (`0.0.0.0:3000`),
    `CONTENT_DIR` (`content`), `STATIC_DIR` (`static`).
-3. **Load posts** — `posts::load_all` (disk I/O, pre-sandbox).
-4. **Bind TCP listener** — `std::net::TcpListener::bind`, set nonblocking
+2. **Load posts** — `posts::load_all` (disk I/O, pre-sandbox).
+3. **Bind TCP listener** — `std::net::TcpListener::bind`, set nonblocking
    (pre-sandbox so landlock can't block it).
-5. **Apply sandbox** — landlock restricts FS + net.
-6. **Build tokio runtime** — multi-thread, created post-sandbox so its worker
+4. **Apply sandbox** — landlock restricts FS + net.
+5. **Build tokio runtime** — multi-thread, created post-sandbox so its worker
    threads inherit the landlock domain.
-7. **Serve** — `axum::serve` with `with_graceful_shutdown` awaiting SIGINT
+6. **Serve** — `axum::serve` with `with_graceful_shutdown` awaiting SIGINT
    (Ctrl-C) or SIGTERM (Unix); in-flight requests drain before exit.
 
 ### 8. Build & deployment layer
@@ -192,13 +188,13 @@ Startup order is deliberate (each step justifies the next):
   the cosign signature enforced by `policy.json`.
 
 ## Request lifecycle (`GET /posts/my-post`)
-Tracing span opens → router matches `/posts/{slug}` → axum injects cloned
-`State<AppState>` and `Path(slug)` → handler does hashmap lookup in
-`post_pages` → on hit, checks `If-None-Match` header against stored ETag:
-match returns `304 Not Modified`, miss returns `200` with the pre-rendered
-HTML bytes + `ETag` + cache headers; slug not found → pre-rendered 404 page.
-Static assets hit `ServeDir` reading from the only landlock-readable path.
-SIGTERM/SIGINT drains in-flight requests, then the process exits.
+Router matches `/posts/{slug}` → axum injects cloned `State<AppState>` and
+`Path(slug)` → handler does hashmap lookup in `post_pages` → on hit, checks
+`If-None-Match` header against stored ETag: match returns `304 Not Modified`,
+miss returns `200` with the pre-rendered HTML bytes + `ETag` + cache headers;
+slug not found → pre-rendered 404 page. Static assets hit `ServeDir` reading
+from the only landlock-readable path. SIGTERM/SIGINT drains in-flight
+requests, then the process exits.
 
 ## Key invariants
 - **Posts are immutable and in-memory.** A new/changed post requires a restart

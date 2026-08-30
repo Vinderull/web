@@ -3,9 +3,9 @@ use crate::SITE_NAME;
 use crate::SITE_URL;
 use crate::posts::Post;
 
-/// Minimal XML escape for text and attribute values.
-fn esc(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+/// Append `s` to `out`, XML-escaping text and attribute content.
+fn push_esc(out: &mut String, s: &str) {
+    out.reserve(s.len());
     for c in s.chars() {
         match c {
             '&' => out.push_str("&amp;"),
@@ -16,7 +16,6 @@ fn esc(s: &str) -> String {
             _ => out.push(c),
         }
     }
-    out
 }
 
 /// Convert a `YYYY-MM-DD` date string to an RFC 3339 timestamp at midnight UTC.
@@ -36,12 +35,12 @@ pub fn build_feed(posts: &[Post]) -> String {
 
     // Title
     xml.push_str("<title>");
-    xml.push_str(&esc(SITE_NAME));
+    push_esc(&mut xml, SITE_NAME);
     xml.push_str("</title>");
 
     // ID (canonical IRI: trailing slash per RFC 4287 §4.2.6)
     xml.push_str("<id>");
-    xml.push_str(SITE_URL);
+    push_esc(&mut xml, SITE_URL);
     xml.push_str("/</id>");
 
     // updated = newest post's date (posts are sorted desc)
@@ -53,17 +52,18 @@ pub fn build_feed(posts: &[Post]) -> String {
 
     // Self link
     xml.push_str(r#"<link href=""#);
-    xml.push_str(&esc(&format!("{SITE_URL}/feed.xml")));
+    push_esc(&mut xml, SITE_URL);
+    xml.push_str("/feed.xml");
     xml.push_str(r#"" rel="self"/>"#);
 
     // Alternate link
     xml.push_str(r#"<link href=""#);
-    xml.push_str(&esc(SITE_URL));
+    push_esc(&mut xml, SITE_URL);
     xml.push_str(r#"" rel="alternate"/>"#);
 
     // Author (feed-level; covers all entries per RFC 4287)
     xml.push_str("<author><name>");
-    xml.push_str(&esc(SITE_AUTHOR));
+    push_esc(&mut xml, SITE_AUTHOR);
     xml.push_str("</name></author>");
 
     // Entries
@@ -74,12 +74,14 @@ pub fn build_feed(posts: &[Post]) -> String {
 
         // Title
         xml.push_str("<title>");
-        xml.push_str(&esc(&post.title));
+        push_esc(&mut xml, &post.title);
         xml.push_str("</title>");
 
         // ID
         xml.push_str("<id>");
-        xml.push_str(&esc(&format!("{SITE_URL}/posts/{}", post.slug)));
+        push_esc(&mut xml, SITE_URL);
+        xml.push_str("/posts/");
+        push_esc(&mut xml, &post.slug);
         xml.push_str("</id>");
 
         // updated
@@ -90,13 +92,15 @@ pub fn build_feed(posts: &[Post]) -> String {
         // Tags as categories (before link in atom_syndication output)
         for tag in &post.tags {
             xml.push_str(r#"<category term=""#);
-            xml.push_str(&esc(tag));
+            push_esc(&mut xml, tag);
             xml.push_str(r#""/>"#);
         }
 
         // Alternate link
         xml.push_str(r#"<link href=""#);
-        xml.push_str(&esc(&format!("{SITE_URL}/posts/{}", post.slug)));
+        push_esc(&mut xml, SITE_URL);
+        xml.push_str("/posts/");
+        push_esc(&mut xml, &post.slug);
         xml.push_str(r#"" rel="alternate"/>"#);
 
         // published
@@ -105,15 +109,15 @@ pub fn build_feed(posts: &[Post]) -> String {
         xml.push_str("</published>");
 
         // Summary (plain text, before content in atom_syndication output)
-        if let Some(ref desc) = post.description {
+        if let Some(desc) = &post.description {
             xml.push_str("<summary>");
-            xml.push_str(&esc(desc));
+            push_esc(&mut xml, desc);
             xml.push_str("</summary>");
         }
 
         // Content (HTML, entity-escaped)
         xml.push_str(r#"<content type="html">"#);
-        xml.push_str(&esc(&post.html));
+        push_esc(&mut xml, &post.html);
         xml.push_str("</content>");
 
         xml.push_str("</entry>");

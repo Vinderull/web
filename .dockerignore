@@ -17,7 +17,6 @@ tests
 Caddyfile
 LICENSE
 NOTICE
-docker-compose.yml
 build-run.sh
 ignition.json
 blog.tar
