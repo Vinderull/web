@@ -77,6 +77,43 @@ async fn req(
     (parts.status, parts.headers, bytes.to_vec())
 }
 
+// The global method guard only lets GET and HEAD through; every other method
+// is rejected before routing with a bodyless 405 and an explicit Allow header.
+#[tokio::test]
+async fn post_to_root_returns_bodyless_405_with_allow() {
+    let (status, headers, body) = req(app(), "POST", "/", None, None).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        headers.get(header::ALLOW).unwrap().to_str().unwrap(),
+        "GET, HEAD"
+    );
+    assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn post_to_unknown_path_returns_bodyless_405_with_allow() {
+    let (status, headers, body) = req(app(), "POST", "/no/such/path", None, None).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        headers.get(header::ALLOW).unwrap().to_str().unwrap(),
+        "GET, HEAD"
+    );
+    assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn get_unknown_path_stays_404() {
+    let (status, _, _) = req(app(), "GET", "/no/such/path", None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn head_root_returns_200_with_empty_body() {
+    let (status, _, body) = req(app(), "HEAD", "/", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_empty());
+}
+
 #[tokio::test]
 async fn index_returns_200_with_cache_headers() {
     let (status, headers, body) = req(app(), "GET", "/", None, None).await;
