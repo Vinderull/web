@@ -12,8 +12,9 @@ use anyhow::Context;
 use axum::{
     Router,
     body::{Body, Bytes},
-    extract::{Path as AxumPath, Query, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    extract::{Path as AxumPath, Query, Request, State},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
@@ -86,6 +87,23 @@ struct AppState {
     // every other page.
     feed_xml: Bytes,
     feed_etag: HeaderValue,
+}
+
+/// Reject every method but GET and HEAD before routing.
+///
+/// The router only serves GET (plus HEAD via Axum's automatic GET handling),
+/// so any other method gets a bodyless 405 with an explicit `Allow` header
+/// instead of reaching a route or the 404 fallback.
+async fn method_guard(req: Request, next: Next) -> Response {
+    if matches!(*req.method(), Method::GET | Method::HEAD) {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::METHOD_NOT_ALLOWED,
+            [(header::ALLOW, "GET, HEAD")],
+        )
+            .into_response()
+    }
 }
 
 /// Build the application router from loaded posts and a static-asset dir.
@@ -221,7 +239,8 @@ pub fn build_app(
         .route("/healthz", get(|| async { "ok" }))
         .nest_service("/static", ServeDir::new(static_dir))
         .fallback(not_found)
-        .with_state(state))
+        .with_state(state)
+        .layer(middleware::from_fn(method_guard)))
 }
 
 async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
