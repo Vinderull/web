@@ -272,6 +272,18 @@ async fn index_sets_security_headers() {
 }
 
 #[tokio::test]
+async fn index_carries_exact_strict_csp() {
+    // Pin the literal header: the other CSP assertions compare against
+    // `CSP_VALUE`, so a regression in the constant itself is only caught by
+    // asserting the exact policy string on a rendered response.
+    let (_, headers, _) = req(app(), "GET", "/", None, None).await;
+    assert_eq!(
+        headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
+        "default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self'; script-src 'self'; style-src 'self'",
+    );
+}
+
+#[tokio::test]
 async fn post_page_304_on_matching_etag() {
     let slug = "hello-world";
     let app = app();
