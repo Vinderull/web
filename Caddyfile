@@ -26,6 +26,14 @@
 }
 
 bloginorium.me www.bloginorium.me {
+	# The blog is strictly read-only: reject every method except GET and HEAD
+	# at the edge, before reverse_proxy sees the request.
+	@not-get-head {
+		not method GET HEAD
+	}
+	header @not-get-head Allow "GET, HEAD"
+	respond @not-get-head 405
+
 	encode zstd gzip
 
 	header {
