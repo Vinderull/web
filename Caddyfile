@@ -26,27 +26,30 @@
 }
 
 bloginorium.me www.bloginorium.me {
-	# The blog is strictly read-only: reject every method except GET and HEAD
-	# at the edge, before reverse_proxy sees the request.
-	@not-get-head {
-		not method GET HEAD
-	}
-	header @not-get-head Allow "GET, HEAD"
-	respond @not-get-head 405
-
-	encode zstd gzip
-
+	# Security headers apply to both proxied and method-rejection responses.
 	header {
 		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 		-Server
 	}
 
-	request_body {
-		max_size 1MB
+	# The blog is strictly read-only. Only GET and HEAD enter the proxy path;
+	# every other method is handled by the mutually exclusive fallback below.
+	@allowed-method method GET HEAD
+	handle @allowed-method {
+		encode zstd gzip
+
+		request_body {
+			max_size 1MB
+		}
+
+		reverse_proxy 127.0.0.1:3000 {
+			health_uri /healthz
+			health_interval 5s
+		}
 	}
 
-	reverse_proxy 127.0.0.1:3000 {
-		health_uri /healthz
-		health_interval 5s
+	handle {
+		header Allow "GET, HEAD"
+		respond 405
 	}
 }
