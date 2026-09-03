@@ -145,6 +145,22 @@ async fn static_asset_served() {
 }
 
 #[tokio::test]
+async fn favicon_is_advertised_and_served() {
+    let (status, _, body) = req(app(), "GET", "/", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(body).unwrap();
+    assert!(
+        body.contains(r#"<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">"#),
+        "full pages should advertise the SVG favicon"
+    );
+
+    let (status, headers, body) = req(app(), "GET", "/static/favicon.svg", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
+    assert!(!body.is_empty(), "favicon should have content");
+}
+
+#[tokio::test]
 async fn static_htmx_matches_sri_integrity() {
     // The bytes served, the hash pinned by scripts/update-htmx.sh, and the
     // integrity attribute on the <script> tag in templates/base.html must be
