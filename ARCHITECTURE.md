@@ -50,10 +50,10 @@ truth. Posts are read **once at startup**, never at request time.
    collects headings, slugifies them into stable `id` anchors (deduped on
    collision), writes those ids back onto the `<h1>`–`<h6>` tags, and produces
    a nested **table of contents** (`h2+` only; `h1` is the post title). Fenced
-   code blocks are syntax-highlighted in the same pass with `syntect`
-   (`ClassedHTMLGenerator`, `tok-*` classes — not inline styles, so the
-   `style-src 'self'` CSP holds); colors come from the generated theme CSS in
-   `static/css/main.css`. The final HTML is sanitized through `ammonia`
+   code blocks pass through `pulldown-cmark` unchanged: it emits `<pre><code>`
+   (with a `language-*` class for the fence's language identifier) and escapes
+   the code; no syntax coloring is applied. The final HTML is sanitized through
+   `ammonia`
    (allowlists safe elements/attributes; strips everything else).
 4. `format_date` — `YYYY-MM-DD` → `"[month repr:long] [day], [year]"` via the
    `time` crate.

@@ -79,32 +79,24 @@ generated during `load_all()` and written to the static dir before sandboxing.
 
 ## 4. Syntax Highlighting
 
-Code blocks currently have a gray background with no token-level coloring.
-Syntax highlighting assigns colors to keywords, strings, types, comments,
-etc. based on language.
+Code blocks have a gray background with no token-level coloring. Fenced code
+blocks are rendered and escaped by `pulldown-cmark` during `load_all()`: they
+emit `<pre><code>` with a `language-*` class for the fence's language
+identifier, and the code is escaped so it displays verbatim. No syntax
+coloring is applied at boot or on the request path.
 
-**Approach: build-time with `syntect`.** The `syntect` crate runs during
-`load_all()`. It's fast, pure Rust, no JS shipped to clients. Output is
-inline-styled HTML (`<span style="color: #...">`), which works with the
-existing CSP. Done once at boot, served from memory.
+**Alternative considered and rejected: client-side with Prism/highlight.js.**
+It adds JavaScript and language-definition weight to clients, performs work on
+every page load, and can cause a flash of unhighlighted code.
 
-**Alternative: client-side with Prism/highlight.js.** Simpler to implement
-but adds JS weight, causes flash-of-unstyled-code, and requires loosening
-the CSP to allow inline styles or `unsafe-inline`.
-
-**Design decision: which color theme?** `syntect` bundles Sublime Text
-themes. Options:
-- A dark theme on a light blog creates striking contrast (e.g. `base16-ocean.dark`)
-- A muted, warm theme that matches the site's restrained aesthetic
-- Ship both and let `prefers-color-scheme` pick (requires rendering both and
-  toggling visibility with CSS)
-
-**Trade-off:** `syntect` adds compilation time (it bundles syntax definition
-files) and ~2-3MB to the binary. For a personal blog this is fine; for the
-~2.3MB distroless purist it's worth measuring before committing.
+**Decision: no syntax highlighting.** Code blocks keep the plain, escaped
+`<pre><code>` that pulldown-cmark produces. A gray `--code-bg` background keeps
+them visually distinct. The CSP stays `style-src 'self'`, and no highlight
+weight is added to the binary or shipped to clients.
 
 **Architecture:** Runs in `load_all()` during the markdown→HTML pass. The
-rendered HTML includes highlighted code blocks. No request-path changes.
+rendered HTML includes the escaped code blocks unchanged. No request-path
+changes.
 
 ---
 
@@ -150,11 +142,6 @@ The site currently has a single color scheme: near-white background
   of vanilla JS. Eliminates flash-of-wrong-theme on load. The current site
   has no custom JS at all (only the vendored htmx), so this is a meaningful
   philosophical choice.
-
-**Syntax highlighting interaction:** If using `syntect`, the highlight theme
-needs a dark variant. Options: render both light and dark HTML and toggle
-with CSS (`display: none`), or choose a single theme that looks acceptable on
-both backgrounds.
 
 **Architecture:** CSS change only if going zero-JS. Adding a toggle introduces
 a small JS file in `/static/js/theme.js`.
@@ -355,7 +342,7 @@ Suggested sequencing if building these out:
 | 4 | OpenGraph cards (no image) | Makes sharing look professional |
 | 5 | Tags | Enables tag pages, related posts, tag feeds |
 | 6 | Custom 404 | Small, personality-adding |
-| 7 | Syntax highlighting | Biggest visual upgrade, but `syntect` adds weight |
+| 7 | Syntax highlighting | Biggest visual upgrade; not implemented (plain escaped code blocks kept) |
 | 8 | Dark mode | CSS refactor, philosophical choice on JS toggle |
 | 9 | Search | Most complex, but htmx approach is clean |
 | 10 | Sitemap | Only if you want search engines |
@@ -365,9 +352,9 @@ Suggested sequencing if building these out:
 ## What This Looks Like After
 
 A visitor comes to the blog. They see a clean list of posts, each with a
-reading time estimate and tags. They click into a post — syntax-highlighted
-code, a table of contents at the top, related posts at the bottom, and
-previous/next arrows. They share the post on Discord and it unfurls with a
+reading time estimate and tags. They click into a post — escaped code blocks,
+a table of contents at the top, related posts at the bottom, and previous/next
+arrows. They share the post on Discord and it unfurls with a
 title, description, and (eventually) a nice card image. They subscribe to
 the Atom feed in their reader. They search for a topic and get instant
 results. They flip to dark mode when reading at night.
