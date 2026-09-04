@@ -46,15 +46,23 @@ truth. Posts are read **once at startup**, never at request time.
    blocks fall back to raw content).
 2. `toml::from_str` → `FrontMatter { title, date, description, tags }`.
 3. `render_markdown` — `pulldown-cmark` with tables, footnotes, strikethrough,
-   task lists enabled; output is HTML strings. In the same parse pass it
+   task lists enabled; **fallible** (`Result`). In the same parse pass it
    collects headings, slugifies them into stable `id` anchors (deduped on
    collision), writes those ids back onto the `<h1>`–`<h6>` tags, and produces
    a nested **table of contents** (`h2+` only; `h1` is the post title). Fenced
    code blocks pass through `pulldown-cmark` unchanged: it emits `<pre><code>`
    (with a `language-*` class for the fence's language identifier) and escapes
-   the code; no syntax coloring is applied. The final HTML is sanitized through
-   `ammonia`
-   (allowlists safe elements/attributes; strips everything else).
+   the code; no syntax coloring is applied. The validated, structured events
+   are rendered directly to HTML by `pulldown-cmark` — there is **no post-render
+   sanitizer**. Instead the pipeline enforces a strict authoring
+   contract up front: **raw HTML is unsupported** — both block and inline HTML
+   events are rejected (including events consumed inside headings) — and every
+   link/image destination must be a relative URL, a `#fragment`, or a
+   case-insensitive `http`, `https`, or `mailto` URI. Protocol-relative targets
+   (`//host/…`), backslashes, ASCII whitespace/control characters, and all
+   other explicit schemes (`javascript:`, `data:`, `file:`, `ftp:`, …) fail
+   validation. A post violating the policy makes startup fail; the error
+   propagates instead of silently dropping content.
 4. `format_date` — `YYYY-MM-DD` → `"[month repr:long] [day], [year]"` via the
    `time` crate.
 5. `reading_time` — word count ÷ 200, rounded up to nearest integer.
@@ -215,3 +223,7 @@ then the process exits.
   connects are kernel-denied; the blog makes no external calls.
 - **Templates are compile-time checked** — a bad template fails the build, not
   a request.
+- **Simple Markdown only; no post-render sanitization.** Raw HTML and unsafe
+  link/image destinations are rejected when posts load, so the served HTML is
+  produced directly from validated pulldown-cmark events. Errors surface at
+  startup rather than serving sanitized or partially rendered content.
