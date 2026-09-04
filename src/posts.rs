@@ -123,7 +123,7 @@ pub fn load_pages(content_dir: &Path) -> Result<Vec<Page>> {
 fn parse_page(slug: &str, content: &str) -> Result<Page> {
     let (frontmatter, markdown) = split_frontmatter(content);
     let fm: PageFrontMatter = toml::from_str(&frontmatter).context("parsing frontmatter")?;
-    let (html, _) = render_markdown(markdown);
+    let (html, _) = render_markdown(markdown).context("rendering markdown body")?;
     Ok(Page {
         slug: slug.to_string(),
         title: fm.title,
@@ -135,7 +135,7 @@ fn parse_post(slug: &str, content: &str) -> Result<Post> {
     let (frontmatter, markdown) = split_frontmatter(content);
     let fm: FrontMatter = toml::from_str(&frontmatter).context("parsing frontmatter")?;
 
-    let (html, toc) = render_markdown(markdown);
+    let (html, toc) = render_markdown(markdown).context("rendering markdown body")?;
     let date_display = format_date(&fm.date)?;
     let reading_time = estimate_reading_time(markdown);
 
@@ -191,11 +191,16 @@ struct TocNode {
     children: Vec<usize>,
 }
 
-/// Render markdown to sanitized HTML plus a table of contents (empty string
+/// Render markdown to validated HTML plus a table of contents (empty string
 /// when there are no h2+ headings). Both share one parse pass: heading text is
 /// collected, slugged, and written back as `id` attributes on the emitted
 /// headings so ToC anchors resolve within the body.
-fn render_markdown(markdown: &str) -> (String, String) {
+///
+/// The validated event stream is rendered directly with `push_html`; no
+/// post-hoc HTML sanitizer is applied. Authored raw HTML (block or inline) and
+/// link/image destinations outside the allowed URL policy are rejected, with
+/// error messages that distinguish the two so callers surface useful context.
+fn render_markdown(markdown: &str) -> Result<(String, String)> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
@@ -215,6 +220,12 @@ fn render_markdown(markdown: &str) -> (String, String) {
                     .by_ref()
                     .take_while(|e| !matches!(e, Event::End(TagEnd::Heading(_))))
                     .collect();
+                // The heading body is still an authored markdown event stream:
+                // raw HTML and unsafe destinations inside a heading must be
+                // rejected too.
+                for e in &inner {
+                    validate_event(e)?;
+                }
                 let mut text = String::new();
                 for e in &inner {
                     if let Event::Text(t) | Event::Code(t) = e {
@@ -232,21 +243,86 @@ fn render_markdown(markdown: &str) -> (String, String) {
                 out.push(Event::End(TagEnd::Heading(level)));
                 headings.push((level as u32, id, text));
             }
-            other => out.push(other),
+            other => {
+                validate_event(&other)?;
+                out.push(other);
+            }
         }
     }
 
-    let mut raw_html = String::new();
-    html::push_html(&mut raw_html, out.into_iter());
+    let mut body = String::new();
+    html::push_html(&mut body, out.into_iter());
 
-    let mut cleaner = ammonia::Builder::new();
-    cleaner
-        .add_tags(&["input"])
-        .add_generic_attributes(&["id", "class"])
-        .add_tag_attributes("input", &["type", "checked", "disabled"]);
-    let body = cleaner.clean(&raw_html).to_string();
+    Ok((body, build_toc(&headings)))
+}
 
-    (body, build_toc(&headings))
+/// Validate a single authored markdown event against the security policy.
+///
+/// Raw HTML (block or inline) is rejected outright, and every link/image
+/// destination must satisfy `validate_destination`. Returns a message naming
+/// the offending construct so errors carry useful context.
+fn validate_event(ev: &Event) -> Result<()> {
+    match ev {
+        Event::Html(_) | Event::InlineHtml(_) => {
+            Err(anyhow::anyhow!("raw HTML is not allowed in markdown"))
+        }
+        Event::Start(Tag::Link { dest_url, .. }) | Event::Start(Tag::Image { dest_url, .. }) => {
+            validate_destination(dest_url).map_err(|detail| anyhow::anyhow!("{detail}"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Allowed link/image destination policy: ordinary relative URLs and
+/// fragments, plus case-insensitive `http`, `https`, and `mailto` schemes.
+/// Protocol-relative URLs, backslashes, ASCII whitespace/control characters,
+/// and every other explicit scheme (e.g. `javascript`, `data`, `file`, `ftp`)
+/// are rejected. Nothing is allocated on the success path.
+fn validate_destination(dest: &str) -> std::result::Result<(), String> {
+    let err = |detail: String| format!("unsafe link destination {dest:?}: {detail}");
+    if dest.starts_with("//") {
+        return Err(err("protocol-relative URLs are not allowed".to_string()));
+    }
+    if dest.contains('\\') {
+        return Err(err("backslashes are not allowed".to_string()));
+    }
+    let bytes = dest.as_bytes();
+    if bytes.iter().any(|&b| b < 0x21 || b == 0x7f) {
+        return Err(err("contains whitespace or control characters".to_string()));
+    }
+    if let Some(colon) = scheme_end(dest) {
+        let scheme = &dest[..colon];
+        if !matches_scheme(scheme) {
+            return Err(err(format!("scheme '{scheme}' is not allowed")));
+        }
+    }
+    Ok(())
+}
+
+/// Index of the `:` ending a URL scheme prefix, or `None` when the leading
+/// characters do not form an RFC 3986 scheme (`ALPHA *( ALPHA / DIGIT / "+" /
+/// "-" / "." )`).
+fn scheme_end(dest: &str) -> Option<usize> {
+    let mut chars = dest.char_indices();
+    match chars.next() {
+        Some((_, c)) if c.is_ascii_alphabetic() => {}
+        _ => return None,
+    }
+    for (i, c) in chars {
+        match c {
+            ':' => return Some(i),
+            c if c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.' => {}
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Whether `scheme` is one of the allowed schemes, case-insensitively.
+fn matches_scheme(scheme: &str) -> bool {
+    scheme.eq_ignore_ascii_case("http")
+        || scheme.eq_ignore_ascii_case("https")
+        || scheme.eq_ignore_ascii_case("mailto")
 }
 
 /// Escape `&`, `<`, `>` — used when embedding heading text into the ToC HTML.
@@ -434,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_render_markdown() {
-        let (html, _) = render_markdown("# Title\n\n- item 1\n- item 2");
+        let (html, _) = render_markdown("# Title\n\n- item 1\n- item 2").unwrap();
         assert!(html.contains("<h1 id=\"title\">Title</h1>"));
         assert!(html.contains("<li>item 1</li>"));
     }
@@ -558,21 +634,21 @@ mod tests {
     #[test]
     fn test_render_markdown_table() {
         let md = "| A | B |\n|---|---|\n| 1 | 2 |";
-        let (html, _) = render_markdown(md);
+        let (html, _) = render_markdown(md).unwrap();
         assert!(html.contains("<table>"));
         assert!(html.contains("<td>1</td>"));
     }
 
     #[test]
     fn test_render_markdown_strikethrough() {
-        let (html, _) = render_markdown("~~deleted~~");
+        let (html, _) = render_markdown("~~deleted~~").unwrap();
         assert!(html.contains("<del>deleted</del>"));
     }
 
     #[test]
     fn test_render_markdown_code_block() {
         // Ordinary fenced blocks render through pulldown-cmark as pre/code.
-        let (html, _) = render_markdown("```\nlet x = 1;\n```");
+        let (html, _) = render_markdown("```\nlet x = 1;\n```").unwrap();
         assert!(
             html.contains("<pre><code>"),
             "fenced block wrapped in pre/code: {html}"
@@ -582,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_render_markdown_fenced_language_class() {
-        let (html, _) = render_markdown("```rust\nfn main() { let x = 1; }\n```");
+        let (html, _) = render_markdown("```rust\nfn main() { let x = 1; }\n```").unwrap();
         // The language id surfaces as pulldown-cmark's language-* class.
         assert!(
             html.contains("class=\"language-rust\""),
@@ -594,7 +670,7 @@ mod tests {
     #[test]
     fn test_render_markdown_code_escaping() {
         // Code content (regardless of language id) must be HTML-escaped.
-        let (html, _) = render_markdown("```nope\n<a & b>\n```");
+        let (html, _) = render_markdown("```nope\n<a & b>\n```").unwrap();
         assert!(!html.contains("<a &"), "raw HTML must be escaped: {html}");
         assert!(html.contains("&lt;a"), "`<` escaped: {html}");
         assert!(html.contains("&amp;"), "`&` escaped: {html}");
@@ -603,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_render_markdown_tasklist() {
-        let (html, _) = render_markdown("- [x] done\n- [ ] todo");
+        let (html, _) = render_markdown("- [x] done\n- [ ] todo").unwrap();
         assert!(
             html.contains("task-list") || html.contains("checkbox") || html.contains("disabled")
         );
@@ -612,7 +688,7 @@ mod tests {
     #[test]
     fn test_render_markdown_toc_nested() {
         let md = "# Title\n\n## Section A\n\n### Sub one\n\n### Sub two\n\n## Section B";
-        let (html, toc) = render_markdown(md);
+        let (html, toc) = render_markdown(md).unwrap();
         // h1 (the title) is excluded from the ToC but still gets an id.
         assert!(html.contains("<h1 id=\"title\">Title</h1>"));
         assert!(html.contains("<h2 id=\"section-a\">Section A</h2>"));
@@ -632,7 +708,7 @@ mod tests {
 
     #[test]
     fn test_render_markdown_toc_empty_when_no_headings() {
-        let (_, toc) = render_markdown("just **text**, no headings");
+        let (_, toc) = render_markdown("just **text**, no headings").unwrap();
         assert!(toc.is_empty());
     }
 
@@ -641,7 +717,7 @@ mod tests {
         // Heading text is inserted into the ToC with `|safe` in the template,
         // so it must be HTML-escaped at build time to prevent stored XSS from
         // untrusted post content.
-        let (_html, toc) = render_markdown("## A & B");
+        let (_html, toc) = render_markdown("## A & B").unwrap();
         assert!(toc.contains("A &amp; B"), "ToC text must be escaped: {toc}");
         assert!(
             !toc.contains(">A & B<"),
@@ -651,9 +727,157 @@ mod tests {
 
     #[test]
     fn test_render_markdown_toc_only_h1() {
-        let (html, toc) = render_markdown("# Just a title");
+        let (html, toc) = render_markdown("# Just a title").unwrap();
         assert!(html.contains("<h1 id=\"just-a-title\">"));
         assert!(toc.is_empty(), "h1-only posts get no ToC");
+    }
+
+    #[test]
+    fn test_render_markdown_rejects_block_html() {
+        let err = render_markdown("<div>raw</div>").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("raw HTML"),
+            "block raw HTML must be rejected with a raw-HTML message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_render_markdown_rejects_inline_html() {
+        let err = render_markdown("hello <em>world</em>").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("raw HTML"),
+            "inline raw HTML must be rejected with a raw-HTML message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_render_markdown_rejects_inline_html_in_heading() {
+        // Events inside a heading are consumed separately for the ToC, but must
+        // still pass the same validation.
+        let err = render_markdown("## hello <em>world</em>").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("raw HTML"),
+            "raw HTML inside a heading must be rejected, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_render_markdown_rejects_unsafe_destinations() {
+        // Table-drive the URL policy boundaries: every snippet must fail
+        // rendering with a destination error.
+        for (md, label) in [
+            ("[x](javascript:alert(1))", "javascript scheme"),
+            ("![x](javascript:alert(1))", "javascript scheme image"),
+            ("[x](data:foo)", "data scheme"),
+            ("[x](file:///etc/passwd)", "file scheme"),
+            ("[x](ftp://example.com/x)", "ftp scheme"),
+            ("[x](//evil.com)", "protocol-relative"),
+            (r"[x](<\evil.com>)", "backslash"),
+        ] {
+            let err = render_markdown(md).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("unsafe link destination"),
+                "{label}: expected a destination error for {md:?}, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_markdown_allows_safer_destinations() {
+        let html = render_markdown(
+            "[a](https://example.com) [b](http://example.com) [c](mailto:x@y.dev) \
+             [d](/relative/path) [e](#fragment) [f](../up) ![g](/images/pic.png)",
+        )
+        .unwrap()
+        .0;
+        for needle in [
+            r#"href="https://example.com""#,
+            r#"href="http://example.com""#,
+            r#"href="mailto:x@y.dev""#,
+            r#"href="/relative/path""#,
+            "href=\"#fragment\"",
+            r#"href="../up""#,
+            r#"src="/images/pic.png""#,
+        ] {
+            assert!(html.contains(needle), "missing {needle} in: {html}");
+        }
+    }
+
+    #[test]
+    fn test_validate_destination_accepts_allowed() {
+        // Empty, relative, root-relative, fragment, and the allowed schemes
+        // (case-insensitively) must all pass.
+        for dest in [
+            "",
+            "relative/path",
+            "./x",
+            "../x",
+            "/rooted",
+            "file.html",
+            "#fragment",
+            "?query=1",
+            "http://example.com",
+            "HTTPS://EXAMPLE.COM",
+            "https://example.com/x",
+            "mailto:someone@example.com",
+        ] {
+            assert!(
+                validate_destination(dest).is_ok(),
+                "expected '{dest}' to be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_destination_rejects_unsafe() {
+        // Table-drive the rejected boundary: protocol-relative, whitespace and
+        // control characters, and non-allowed explicit schemes.
+        for (dest, needle) in [
+            ("//evil.com", "protocol-relative"),
+            (r"\\evil.com", "backslashes"),
+            ("/ /", ""),
+            ("a b", ""),
+            ("a\tb", ""),
+            ("a\u{0001}b", ""),
+            ("javascript:alert(1)", "javascript"),
+            ("JaVaScRiPt:alert(1)", "JaVaScRiPt"),
+            ("data:image/png;base64,x", "data"),
+            ("FILE:///x", "FILE"),
+            ("ftp://host", "ftp"),
+            ("tel:+1555", "tel"),
+        ] {
+            let err = validate_destination(dest).unwrap_err();
+            if !needle.is_empty() {
+                assert!(
+                    err.contains(needle),
+                    "expected '{needle}' in error for {dest:?}, got: {err}"
+                );
+            } else {
+                assert!(
+                    err.contains("unsafe link destination"),
+                    "expected an unsafe-destination error for {dest:?}, got: {err}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_markdown_trade_entity() {
+        // pulldown-cmark decodes a recognized named entity; the ™ character is
+        // not `&,<,>,",'`, so the HTML renderer emits it verbatim.
+        let (html, _) = render_markdown("Artificial Intelligence&trade;").unwrap();
+        assert!(
+            html.contains("Intelligence™"),
+            "named entity is decoded, not double-escaped: {html}"
+        );
+        assert!(
+            !html.contains("&trade;"),
+            "raw entity must not survive into output: {html}"
+        );
     }
 
     #[test]
@@ -684,6 +908,25 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("posts")).unwrap();
         let posts = load_all(dir.path()).unwrap();
         assert!(posts.is_empty());
+    }
+
+    #[test]
+    fn test_load_all_reports_policy_violation_filename() {
+        let dir = TempDir::new();
+        let posts_subdir = dir.path().join("posts");
+        std::fs::create_dir_all(&posts_subdir).unwrap();
+        std::fs::write(
+            posts_subdir.join("unsafe.md"),
+            "+++\ntitle = \"Unsafe\"\ndate = \"2024-01-01\"\n+++\n<script>x</script>",
+        )
+        .unwrap();
+
+        let message = format!("{:#}", load_all(dir.path()).unwrap_err());
+        assert!(message.contains("unsafe.md"), "missing filename: {message}");
+        assert!(
+            message.contains("raw HTML is not allowed"),
+            "missing policy failure: {message}"
+        );
     }
 
     #[test]

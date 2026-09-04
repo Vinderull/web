@@ -7,8 +7,9 @@ Personal blog built with Rust, axum, and htmx.
 - **axum** 0.8 — HTTP server
 - **askama** 0.16 — compile-time HTML templates
 - **htmx** 4.0.0 — progressive enhancement (SPA-like navigation via `hx-boost`)
-- **pulldown-cmark** — Markdown rendering
-- **ammonia** — HTML sanitization
+- **pulldown-cmark** — simple-Markdown rendering: raw HTML and unsafe
+  link/image destinations are rejected at startup; validated events render
+  directly to HTML (no post-render sanitizer)
 - **landlock** — Linux kernel sandboxing (filesystem + network restrictions)
 - **embedded static assets** — CSS, vendored htmx JS, and the SVG favicon are
   baked into the binary at compile time
@@ -32,6 +33,10 @@ Personal blog built with Rust, axum, and htmx.
 - **Reading time** — estimated from word count, shown on each post.
 - **Code blocks** — fenced code is rendered and escaped by `pulldown-cmark`
   into `<pre><code>` with no syntax coloring.
+- **Simple Markdown only** — authored raw HTML is not supported. Block and
+  inline HTML are rejected when the post is loaded; links/images must use
+  relative URLs, `#fragments`, or `http`/`https`/`mailto`. A violating post
+  fails startup rather than being silently sanitized.
 - **Custom 404** — styled 404 page for unknown routes, slugs, and tags.
 - **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, `Permissions-Policy`, and a strict CSP on every
@@ -91,7 +96,16 @@ tags = ["rust", "web"]
 Markdown content here.
 ```
 
+Posts are written in **simple Markdown**. Raw HTML — block or inline, inside
+headings included — is not supported and causes a startup error if present.
+Links and images may use relative URLs, `#fragments`, and case-insensitive
+`http`, `https`, or `mailto` schemes. Protocol-relative targets (`//host/…`),
+backslashes, ASCII whitespace/control characters in the target, and all other
+explicit schemes (`javascript:`, `data:`, `file:`, `ftp:`, …) are rejected.
+
 Posts are loaded at startup. Restart the server to pick up new/changed posts.
+A post that violates the Markdown policy stops startup with an error naming
+the file, so a bad post is never served half-sanitized.
 
 ## Landlock sandbox
 
