@@ -5,7 +5,6 @@ pub mod sandbox;
 mod templates;
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -18,7 +17,6 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
-use tower_http::services::ServeDir;
 
 use askama::Template;
 use serde::Deserialize;
@@ -53,6 +51,15 @@ pub const CSP_VALUE: &str = "default-src 'none'; base-uri 'none'; connect-src 's
 /// The site uses none of these browser capabilities, so they are denied to
 /// every origin.
 pub const PERMISSIONS_POLICY_VALUE: &str = "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), document-domain=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()";
+
+// The three static assets are embedded into the binary at compile time, so the
+// request path never touches the filesystem: `include_bytes!` bakes the exact
+// vendored source bytes in, and each route serves them from RAM with a static,
+// correct content type. htmx's `.min.js` bytes are thus the exact SRI-pinned
+// release from scripts/update-htmx.sh, byte for byte.
+const STATIC_CSS: &[u8] = include_bytes!("../static/css/main.css");
+const STATIC_JS: &[u8] = include_bytes!("../static/js/htmx.min.js");
+const STATIC_FAVICON: &[u8] = include_bytes!("../static/favicon.svg");
 
 #[derive(Clone)]
 struct AppState {
@@ -106,16 +113,16 @@ async fn method_guard(req: Request, next: Next) -> Response {
     }
 }
 
-/// Build the application router from loaded posts and a static-asset dir.
+/// Build the application router from loaded posts.
 ///
 /// Pre-renders the index, every post page, the tag index, and every tag page
 /// once, so the request path is a pure lookup + header check with no
 /// per-request rendering. Posts are retained in `Arc` for the read-only
-/// `/search` and `/tags/*` routes.
+/// `/search` and `/tags/*` routes. The three static assets (CSS, htmx JS,
+/// favicon) are embedded into the binary at compile time.
 pub fn build_app(
     posts: Vec<posts::Post>,
     about_page: Option<posts::Page>,
-    static_dir: &Path,
 ) -> anyhow::Result<Router> {
     let posts = Arc::new(posts);
     let all_posts: Vec<&posts::Post> = posts.iter().collect();
@@ -189,8 +196,8 @@ pub fn build_app(
     }
     let tag_pages = Arc::new(tag_pages);
 
-    // Pre-render the standalone about page. It was loaded from disk *before*
-    // sandboxing (the request-path invariant is: no FS access except /static).
+    // Pre-render the standalone about page. It was loaded from disk before
+    // sandboxing; the request path performs no filesystem access.
     // Its absence is not an error — the `/about` route just 404s.
     let about_page = about_page
         .map(|page| {
@@ -237,7 +244,11 @@ pub fn build_app(
         .route("/feed", get(|| async { Redirect::permanent("/feed.xml") }))
         .route("/robots.txt", get(robots_txt))
         .route("/healthz", get(|| async { "ok" }))
-        .nest_service("/static", ServeDir::new(static_dir))
+        // The three embedded assets: exact routes, so any other `/static/*`
+        // path falls through to the 404 fallback.
+        .route("/static/css/main.css", get(static_css))
+        .route("/static/js/htmx.min.js", get(static_js))
+        .route("/static/favicon.svg", get(static_favicon))
         .fallback(not_found)
         .with_state(state)
         .layer(middleware::from_fn(method_guard)))
@@ -293,6 +304,38 @@ async fn robots_txt() -> Response {
     );
     apply_security_headers(&mut resp);
     resp
+}
+
+/// Serve the embedded `main.css` with a fixed stylesheet content type.
+///
+/// GET and HEAD both succeed (axum auto-handles HEAD on GET routes, leaving
+/// the body empty); any other `/static/*` path misses these exact routes and
+/// reaches the 404 fallback.
+async fn static_css() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        Bytes::from_static(STATIC_CSS),
+    )
+        .into_response()
+}
+
+/// Serve the embedded vendored `htmx.min.js` with a browser-compatible
+/// JavaScript content type.
+async fn static_js() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        Bytes::from_static(STATIC_JS),
+    )
+        .into_response()
+}
+
+/// Serve the embedded SVG favicon.
+async fn static_favicon() -> Response {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml")],
+        Bytes::from_static(STATIC_FAVICON),
+    )
+        .into_response()
 }
 
 async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -557,8 +600,7 @@ fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
 
 /// Apply the hardening headers that are safe on every HTML response:
 /// MIME sniffing off, framing denied, a strict referrer policy, and the
-/// site's CSP (`style-src 'self'` is why highlighting uses classed spans).
-/// Shared by cached pages and the uncached `/search` fragment.
+/// site's CSP. Shared by cached pages and the uncached `/search` fragment.
 fn apply_security_headers(resp: &mut Response) {
     resp.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -936,7 +978,7 @@ mod tests {
 
     // Unknown paths and unknown slugs/tags all yield the custom 404 page.
     async fn not_found_body(uri: &str) -> (StatusCode, String) {
-        let app = build_app(Vec::new(), None, Path::new("static")).unwrap();
+        let app = build_app(Vec::new(), None).unwrap();
         let resp = app
             .oneshot(
                 axum::http::Request::builder()
@@ -982,7 +1024,7 @@ mod tests {
 
     #[tokio::test]
     async fn robots_txt_disallows_search() {
-        let app = build_app(Vec::new(), None, Path::new("static")).unwrap();
+        let app = build_app(Vec::new(), None).unwrap();
         let resp = app
             .oneshot(
                 axum::http::Request::builder()
@@ -1014,7 +1056,7 @@ mod tests {
 
     #[tokio::test]
     async fn feed_304_echoes_etag_and_cache_control() {
-        let app = build_app(Vec::new(), None, Path::new("static")).unwrap();
+        let app = build_app(Vec::new(), None).unwrap();
         let first = app
             .clone()
             .oneshot(

@@ -24,13 +24,13 @@ production by Caddy for TLS. Site name/URL are compile-time constants
             │  │ /search   │/feed.xml │ /teapot  │/healthz │  │
             │  └─────┬─────┴─────┬─────┴──────────┴───┬────┘  │
             │        │           │                      │       │
-            │   Pre-rendered    Pre-rendered         ServeDir  │
-            │   HTML + ETag     HTML + ETag       (tower-http) │
-            │   (built at boot, (hashmap lookup)   static/     │
-            │    hashmap lookup)                  (RO FS)      │
+            │   Pre-rendered    Pre-rendered      Embedded static│
+            │   HTML + ETag     HTML + ETag       assets: /static/│
+            │   (built at boot, (hashmap lookup)   css/js/favicon│
+            │    hashmap lookup)                  (compile-time)│
             └───────────────────────────────────────┼──────────┘
                                                      │
-                          landlock: only static/ readable; rest denied
+                 landlock: no filesystem path granted; all denied
 ```
 
 ## Layers
@@ -95,7 +95,7 @@ site_name), `SearchResultsTemplate<'a>` (posts + query), `TagsIndexTemplate<'a>`
 (tags + site_name), `TagTemplate<'a>` (tag + posts + site_name),
 `NotFoundTemplate<'a>` (site_name). All borrow the in-memory `Post`s/`Page`s.
 
-### 4. Web server layer — axum 0.8 + tower-http (`src/lib.rs`)
+### 4. Web server layer — axum 0.8 (`src/lib.rs`)
 A `Router` with shared `AppState` containing pre-rendered `Bytes` + `ETag`
 values for every page, built once in `build_app()`. Request handlers do pure
 hashmap lookups + ETag comparisons — no per-request Askama rendering.
@@ -112,8 +112,10 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
 | `GET /feed.xml` | `feed` | pre-rendered Atom feed (`application/atom+xml`) |
 | `GET /feed` | redirect | permanent redirect to `/feed.xml` |
 | `GET /healthz` | inline | `"ok"` as `text/plain` (Caddy health gate) |
-| `GET /static/*` | `ServeDir` | files streamed from `static/` (tower-http `fs`) |
-| (fallback) | `not_found` | pre-rendered 404 page |
+| `GET /static/css/main.css` | `static_css` | embedded `include_bytes!` body, `text/css; charset=utf-8` |
+| `GET /static/js/htmx.min.js` | `static_js` | embedded `include_bytes!` body, `text/javascript; charset=utf-8` |
+| `GET /static/favicon.svg` | `static_favicon` | embedded `include_bytes!` body, `image/svg+xml` |
+| (fallback) | `not_found` | pre-rendered 404 page (incl. other `/static/*`) |
 
 - All mutable work (markdown → HTML, Askama rendering, feed XML generation)
   happens in `build_app()` before the router is built. The request path only
@@ -126,6 +128,10 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
   `Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'`.
 
 ### 5. Frontend layer — htmx 4.0.0 + CSS (`static/`)
+The repo's `static/` directory is a **compile-time source**: `main.css`,
+`htmx.min.js`, and `favicon.svg` are embedded into the binary with
+`include_bytes!` and served from RAM at their exact `/static/...` URLs, so no
+`static/` copy is needed at runtime.
 - `htmx.min.js` is **self-hosted** (vendored, not a CDN) and loaded on every
   page. `hx-boost="true"` on `<body>` upgrades same-origin links/forms into
   background fetches that swap `<body>` — giving SPA-like navigation without a
@@ -134,10 +140,11 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
   code/blockquote styling, `.htmx-indicator` transition). No CSS framework.
 
 ### 6. Runtime hardening layer — Landlock (`src/sandbox.rs`)
-Before the tokio runtime is created, `sandbox::apply(static_dir)` restricts
+Before the tokio runtime is created, `sandbox::apply()` restricts
 the process with a Linux landlock ruleset (ABI V9, `BestEffort` compatibility):
-- **Filesystem**: read-only access to `static_dir` only. `content/` is already
-  in memory, the binary/templates/etc. become unreadable.
+- **Filesystem**: **no filesystem path is granted.** `content/` is already in
+  memory and the static assets are embedded into the binary at compile time,
+  so the sandbox denies every further read and write.
 - **Network**: `BindTcp` and `ConnectTcp` are both handled with no port-grant
   rules, so landlock denies all TCP binding (the listener is already bound
   before sandboxing) and all outbound connects (the server makes no external
@@ -152,7 +159,7 @@ the process with a Linux landlock ruleset (ABI V9, `BestEffort` compatibility):
 ### 7. Process / startup layer (`src/main.rs`, `src/config.rs`)
 Startup order is deliberate (each step justifies the next):
 1. **Config** — `Config::from_env()` reads `BIND_ADDR` (`0.0.0.0:3000`),
-   `CONTENT_DIR` (`content`), `STATIC_DIR` (`static`).
+   `CONTENT_DIR` (`content`).
 2. **Load posts** — `posts::load_all` (disk I/O, pre-sandbox).
 3. **Bind TCP listener** — `std::net::TcpListener::bind`, set nonblocking
    (pre-sandbox so landlock can't block it).
@@ -165,9 +172,10 @@ Startup order is deliberate (each step justifies the next):
 ### 8. Build & deployment layer
 - **Dockerfile** (`.devcontainer/Dockerfile`) — multi-stage: `dev` (devcontainer
   toolchain + musl target), `builder` (`cargo build --release` against
-  `x86_64-unknown-linux-musl`), `runtime` (scratch, copies binary +
-  `content/` + `static/`, bakes `CONTENT_DIR`/`STATIC_DIR` via `ENV`, runs as
-  UID 65532, `EXPOSE 3000`).
+  `x86_64-unknown-linux-musl`), `runtime` (scratch, copies binary + `content/`,
+  bakes `CONTENT_DIR` via `ENV`, runs as UID 65532, `EXPOSE 3000`). The static
+  assets are compiled into the binary, so no `static/` copy or env var is
+  needed at runtime.
   Final image ~2.3MB, no shell/libc/package-manager.
 - **Podman Quadlet** (`quadlet/`) — systemd units (`web.pod`,
   `blog.container`, `caddy.container`, `*.volume`) run the app + Caddy in one
@@ -192,15 +200,17 @@ Router matches `/posts/{slug}` → axum injects cloned `State<AppState>` and
 `Path(slug)` → handler does hashmap lookup in `post_pages` → on hit, checks
 `If-None-Match` header against stored ETag: match returns `304 Not Modified`,
 miss returns `200` with the pre-rendered HTML bytes + `ETag` + cache headers;
-slug not found → pre-rendered 404 page. Static assets hit `ServeDir` reading
-from the only landlock-readable path. SIGTERM/SIGINT drains in-flight
-requests, then the process exits.
+slug not found → pre-rendered 404 page. Static asset requests hit their exact
+routes and are served the byte-identical `include_bytes!` bodies straight
+from RAM — no filesystem access. SIGTERM/SIGINT drains in-flight requests,
+then the process exits.
 
 ## Key invariants
 - **Posts are immutable and in-memory.** A new/changed post requires a restart
   (re-run `load_all` at boot).
-- **The request path touches the filesystem only for `/static/*`.** Everything
-  else is served from RAM, so landlock can deny the rest.
+- **The request path never touches the filesystem.** Everything — pages and
+  the embedded static assets — is served from RAM, so landlock grants no
+  filesystem path at all.
 - **No outbound network after sandboxing**: `ConnectTcp` is handled, so egress
   connects are kernel-denied; the blog makes no external calls.
 - **Templates are compile-time checked** — a bad template fails the build, not

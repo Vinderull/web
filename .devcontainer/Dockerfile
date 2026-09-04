@@ -31,9 +31,7 @@ FROM scratch AS runtime
 WORKDIR /app
 COPY --from=builder /web /app/web
 COPY --from=builder /build/content /app/content
-COPY --from=builder /build/static /app/static
-ENV CONTENT_DIR=/app/content \
-    STATIC_DIR=/app/static
+ENV CONTENT_DIR=/app/content
 USER 65532:65532
 EXPOSE 3000
 CMD ["/app/web"]

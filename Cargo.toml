@@ -8,7 +8,6 @@ edition = "2024"
 # we only use the HTTP1 server, the Query extractor, and tokio-backed serve.
 axum = { version = "0.8", default-features = false, features = ["http1", "query", "tokio"] }
 tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "net", "signal"] }
-tower-http = { version = "0.7", default-features = false, features = ["fs"] }
 askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde = { version = "1.0", features = ["derive"] }

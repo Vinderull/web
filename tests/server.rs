@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
@@ -46,7 +44,7 @@ fn test_about() -> posts::Page {
 
 /// Wire up the app against the fixed synthetic corpus.
 fn app() -> Router {
-    build_app(test_corpus(), Some(test_about()), Path::new("static")).expect("build app")
+    build_app(test_corpus(), Some(test_about())).expect("build app")
 }
 
 /// Drive a request through the router in-process (no TCP socket) and return
@@ -175,10 +173,37 @@ async fn healthz_returns_ok() {
 }
 
 #[tokio::test]
-async fn static_asset_served() {
-    let (status, _, body) = req(app(), "GET", "/static/css/main.css", None, None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(!body.is_empty(), "css should have content");
+async fn static_assets_serve_exact_source_bytes_with_correct_types() {
+    // The three embedded assets must be served byte-for-byte as they exist in
+    // the repo: `include_bytes!` bakes those exact bytes into the binary.
+    let cases = [
+        (
+            "/static/css/main.css",
+            "static/css/main.css",
+            "text/css; charset=utf-8",
+        ),
+        (
+            "/static/js/htmx.min.js",
+            "static/js/htmx.min.js",
+            "text/javascript; charset=utf-8",
+        ),
+        ("/static/favicon.svg", "static/favicon.svg", "image/svg+xml"),
+    ];
+    for (uri, source, expected_type) in cases {
+        let (status, headers, body) = req(app(), "GET", uri, None, None).await;
+        assert_eq!(status, StatusCode::OK, "{uri} should serve");
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            expected_type,
+            "{uri} content type"
+        );
+        let source_bytes =
+            std::fs::read(source).unwrap_or_else(|e| panic!("reading {source}: {e}"));
+        assert_eq!(
+            body, source_bytes,
+            "{uri} must serve the embedded source bytes"
+        );
+    }
 }
 
 #[tokio::test]
@@ -194,7 +219,11 @@ async fn favicon_is_advertised_and_served() {
     let (status, headers, body) = req(app(), "GET", "/static/favicon.svg", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
-    assert!(!body.is_empty(), "favicon should have content");
+    assert_eq!(
+        body,
+        std::fs::read("static/favicon.svg").expect("favicon source must exist"),
+        "favicon must serve the embedded source bytes"
+    );
 }
 
 #[tokio::test]
@@ -208,8 +237,21 @@ async fn static_htmx_matches_sri_integrity() {
     //   SHA384 (SRI)       = openssl dgst -sha384 -binary static/js/htmx.min.js \
     //                        | openssl base64 -A
     // The vendor script prints the SRI value on every run.
-    let (status, _, body) = req(app(), "GET", "/static/js/htmx.min.js", None, None).await;
+    let (status, headers, body) = req(app(), "GET", "/static/js/htmx.min.js", None, None).await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/javascript; charset=utf-8"
+    );
+
+    // The served bytes must be exactly the vendored source file baked in at
+    // compile time.
+    let source = std::fs::read("static/js/htmx.min.js")
+        .expect("vendored htmx.min.js must exist next to the tests");
+    assert_eq!(
+        body, source,
+        "served htmx.min.js must be the embedded source bytes"
+    );
 
     let sha256: [u8; 32] = {
         use sha2::{Digest, Sha256};
@@ -278,6 +320,19 @@ fn base64_sha384(bytes: &[u8]) -> String {
         });
     }
     s
+}
+
+#[tokio::test]
+async fn head_static_asset_returns_200_with_empty_body_and_type() {
+    // HEAD on an embedded asset must mirror GET's status and content-type but
+    // carry an empty body (axum auto-handles HEAD on GET routes).
+    let (status, headers, body) = req(app(), "HEAD", "/static/css/main.css", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/css; charset=utf-8"
+    );
+    assert!(body.is_empty(), "HEAD must not include a body");
 }
 
 #[tokio::test]
