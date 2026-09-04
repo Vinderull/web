@@ -10,7 +10,8 @@ Personal blog built with Rust, axum, and htmx.
 - **pulldown-cmark** — Markdown rendering
 - **ammonia** — HTML sanitization
 - **landlock** — Linux kernel sandboxing (filesystem + network restrictions)
-- **tower-http** — static file serving
+- **embedded static assets** — CSS, vendored htmx JS, and the SVG favicon are
+  baked into the binary at compile time
 
 ## Features
 
@@ -97,9 +98,10 @@ Posts are loaded at startup. Restart the server to pick up new/changed posts.
 The server sandboxes itself with Linux landlock before starting the tokio
 runtime. Worker threads inherit the restrictions:
 
-- **Filesystem**: read-only access to the static asset dir only. Posts are
-  loaded into memory *before* the sandbox applies, so the runtime never reads
-  `content/`. All writes denied.
+- **Filesystem**: posts are loaded into memory *before* the sandbox applies
+  and the static assets are embedded into the binary at compile time, so the
+  sandbox grants **no filesystem path**: all further reads and writes are
+  denied.
 - **Network**: TCP listener is bound *before* sandboxing. After sandboxing, all
   new `bind()`/`connect()` calls are denied (no outbound connections).
 
@@ -111,8 +113,10 @@ refuses to start.
 
 The runtime image is built `FROM scratch` — a fully static musl binary, no
 shell, no libc, no `/etc/passwd`, no userspace of any kind. The image contains
-only the binary, content, and static assets, running as a non-root user (UID
-65532). `CONTENT_DIR` and `STATIC_DIR` are baked in via the Dockerfile `ENV`.
+only the binary and content, running as a non-root user (UID 65532).
+`CONTENT_DIR` is baked in via the Dockerfile `ENV`; the static assets are
+already embedded in the binary at compile time, so no static directory is
+copied into the runtime image.
 
 CI (`.github/workflows/ci.yml`) builds the runtime image and pushes it to
 `ghcr.io/vinderull/web:latest` on each GitHub Release. The Quadlet units pull
@@ -165,4 +169,3 @@ steps in one shot — it builds the `runtime` image and runs it loopback-only on
 |--------------|---------------|---------------------------|
 | `BIND_ADDR`  | `0.0.0.0:3000`| Listen address            |
 | `CONTENT_DIR`| `content`     | Path to posts directory   |
-| `STATIC_DIR` | `static`      | Path to static assets     |

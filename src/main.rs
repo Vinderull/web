@@ -4,14 +4,13 @@ use web::{build_app, config::Config, posts, sandbox};
 fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     println!("Content dir: {}", config.content_dir.display());
-    println!("Static dir: {}", config.static_dir.display());
 
     // Load posts from disk before sandboxing
     let loaded_posts = posts::load_all(&config.content_dir)?;
     println!("Loaded {} posts", loaded_posts.len());
 
     // Load standalone pages alongside posts, before sandboxing (landlock
-    // denies reads outside static/ once applied).
+    // denies all further filesystem reads once applied).
     let about_page = posts::load_pages(&config.content_dir)?
         .into_iter()
         .find(|p| p.slug == "about");
@@ -23,7 +22,7 @@ fn main() -> anyhow::Result<()> {
 
     // Apply landlock sandbox before starting tokio runtime so worker threads
     // inherit the landlock domain.
-    sandbox::apply(&config.static_dir)?;
+    sandbox::apply()?;
 
     // Create runtime after sandboxing so worker threads inherit restrictions
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -33,7 +32,7 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async {
         let listener = tokio::net::TcpListener::from_std(listener)?;
 
-        let app: Router = build_app(loaded_posts, about_page, &config.static_dir)?;
+        let app: Router = build_app(loaded_posts, about_page)?;
 
         let shutdown = async {
             let ctrl_c = tokio::signal::ctrl_c();
