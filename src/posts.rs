@@ -261,15 +261,102 @@ fn render_markdown(markdown: &str) -> Result<(String, String)> {
 /// Raw HTML (block or inline) is rejected outright, and every link/image
 /// destination must satisfy `validate_destination`. Returns a message naming
 /// the offending construct so errors carry useful context.
-fn validate_event(ev: &Event) -> Result<()> {
+fn validate_event(ev: &Event<'_>) -> Result<()> {
     match ev {
         Event::Html(_) | Event::InlineHtml(_) => {
             Err(anyhow::anyhow!("raw HTML is not allowed in markdown"))
         }
-        Event::Start(Tag::Link { dest_url, .. }) | Event::Start(Tag::Image { dest_url, .. }) => {
+        Event::Start(tag) => validate_start_tag(tag),
+        Event::End(tag_end) => validate_end_tag(tag_end),
+        // Leaf payloads carry no embedded structure of their own: text, code,
+        // math, footnote references, line breaks, rules, and task markers are
+        // all safe. Math events are admitted without this application enabling
+        // `Options::ENABLE_MATH` (no math renderer is wired up; they are simply
+        // not treated as a validation failure if they ever appear).
+        Event::Text(_)
+        | Event::Code(_)
+        | Event::InlineMath(_)
+        | Event::DisplayMath(_)
+        | Event::FootnoteReference(_)
+        | Event::SoftBreak
+        | Event::HardBreak
+        | Event::Rule
+        | Event::TaskListMarker(_) => Ok(()),
+    }
+}
+
+/// Allowlist of markdown start tags admitted from authored content. Every
+/// pulldown-cmark 0.13 `Tag` variant is named explicitly so no upstream tag
+/// can silently take the success path.
+///
+/// Link and image destinations are validated against `validate_destination`;
+/// HTML blocks are rejected like their leaf `Event::Html` payloads; tags for
+/// structures this application neither enables nor supports are rejected
+/// explicitly. The match is exhaustive, so a newly added upstream `Tag`
+/// variant fails to compile instead of silently validating.
+fn validate_start_tag(tag: &Tag<'_>) -> Result<()> {
+    match tag {
+        Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
             validate_destination(dest_url).map_err(|detail| anyhow::anyhow!("{detail}"))
         }
-        _ => Ok(()),
+        Tag::HtmlBlock => Err(anyhow::anyhow!("raw HTML is not allowed in markdown")),
+        // Structures enabled by the parser options in `render_markdown`
+        // (tables, footnotes, strikethrough, task lists) plus the core
+        // CommonMark containers and inline spans.
+        Tag::Paragraph
+        | Tag::Heading { .. }
+        | Tag::BlockQuote(_)
+        | Tag::CodeBlock(_)
+        | Tag::List(_)
+        | Tag::Item
+        | Tag::FootnoteDefinition(_)
+        | Tag::Table(_)
+        | Tag::TableHead
+        | Tag::TableRow
+        | Tag::TableCell
+        | Tag::Emphasis
+        | Tag::Strong
+        | Tag::Strikethrough => Ok(()),
+        // Structures this application does not enable or support (definition
+        // lists, super/subscript, metadata blocks). Rejected explicitly so
+        // they can never slip through validation.
+        Tag::DefinitionList
+        | Tag::DefinitionListTitle
+        | Tag::DefinitionListDefinition
+        | Tag::Superscript
+        | Tag::Subscript
+        | Tag::MetadataBlock(_) => Err(anyhow::anyhow!("unsupported markdown structure")),
+    }
+}
+
+/// Exhaustive counterpart to `validate_start_tag` for closing tags. Mirrors
+/// the start-tag policy so a closing tag can never outrun the corresponding
+/// rejected opening structure.
+fn validate_end_tag(tag_end: &TagEnd) -> Result<()> {
+    match tag_end {
+        TagEnd::HtmlBlock => Err(anyhow::anyhow!("raw HTML is not allowed in markdown")),
+        TagEnd::DefinitionList
+        | TagEnd::DefinitionListTitle
+        | TagEnd::DefinitionListDefinition
+        | TagEnd::Superscript
+        | TagEnd::Subscript
+        | TagEnd::MetadataBlock(_) => Err(anyhow::anyhow!("unsupported markdown structure")),
+        TagEnd::Paragraph
+        | TagEnd::Heading(_)
+        | TagEnd::BlockQuote(_)
+        | TagEnd::CodeBlock
+        | TagEnd::List(_)
+        | TagEnd::Item
+        | TagEnd::FootnoteDefinition
+        | TagEnd::Table
+        | TagEnd::TableHead
+        | TagEnd::TableRow
+        | TagEnd::TableCell
+        | TagEnd::Emphasis
+        | TagEnd::Strong
+        | TagEnd::Strikethrough
+        | TagEnd::Link
+        | TagEnd::Image => Ok(()),
     }
 }
 
@@ -804,6 +891,189 @@ mod tests {
             r#"src="/images/pic.png""#,
         ] {
             assert!(html.contains(needle), "missing {needle} in: {html}");
+        }
+    }
+
+    #[test]
+    fn test_validate_event_allows_inline_and_display_math() {
+        // Math payloads are safe even though this application never enables
+        // `Options::ENABLE_MATH`: they must not fail validation if encountered.
+        assert!(validate_event(&Event::InlineMath("$E = mc^2$".into())).is_ok());
+        assert!(validate_event(&Event::DisplayMath("$$\\sum x_i$$".into())).is_ok());
+    }
+
+    #[test]
+    fn test_validate_event_allows_ordinary_events_and_tags() {
+        // Leaf events emitted by ordinary enabled markdown.
+        for ev in [
+            Event::Text("plain text".into()),
+            Event::Code("x + 1".into()),
+            Event::FootnoteReference("1".into()),
+            Event::SoftBreak,
+            Event::HardBreak,
+            Event::Rule,
+            Event::TaskListMarker(true),
+            Event::TaskListMarker(false),
+        ] {
+            assert!(validate_event(&ev).is_ok(), "{ev:?} must be allowed");
+        }
+        // Start tags for supported CommonMark structures and the enabled
+        // table/footnote/strikethrough options.
+        for tag in [
+            Tag::Paragraph,
+            Tag::Heading {
+                level: pulldown_cmark::HeadingLevel::H2,
+                id: None,
+                classes: vec![],
+                attrs: vec![],
+            },
+            Tag::BlockQuote(None),
+            Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Indented),
+            Tag::List(None),
+            Tag::Item,
+            Tag::FootnoteDefinition("1".into()),
+            Tag::Table(vec![]),
+            Tag::TableHead,
+            Tag::TableRow,
+            Tag::TableCell,
+            Tag::Emphasis,
+            Tag::Strong,
+            Tag::Strikethrough,
+        ] {
+            assert!(
+                validate_event(&Event::Start(tag)).is_ok(),
+                "tag must be allowed"
+            );
+        }
+        // Every closing tag for a supported structure (including link/image).
+        for end in [
+            TagEnd::Paragraph,
+            TagEnd::Heading(pulldown_cmark::HeadingLevel::H2),
+            TagEnd::BlockQuote(None),
+            TagEnd::CodeBlock,
+            TagEnd::List(false),
+            TagEnd::Item,
+            TagEnd::FootnoteDefinition,
+            TagEnd::Table,
+            TagEnd::TableHead,
+            TagEnd::TableRow,
+            TagEnd::TableCell,
+            TagEnd::Emphasis,
+            TagEnd::Strong,
+            TagEnd::Strikethrough,
+            TagEnd::Link,
+            TagEnd::Image,
+        ] {
+            assert!(
+                validate_event(&Event::End(end)).is_ok(),
+                "end must be allowed"
+            );
+        }
+        // Safe destinations still pass on start, and their ends pass too.
+        for tag in [
+            Tag::Link {
+                link_type: pulldown_cmark::LinkType::Inline,
+                dest_url: "/images/a.png".into(),
+                title: "".into(),
+                id: "".into(),
+            },
+            Tag::Image {
+                link_type: pulldown_cmark::LinkType::Inline,
+                dest_url: "https://example.com/x".into(),
+                title: "".into(),
+                id: "".into(),
+            },
+        ] {
+            assert!(
+                validate_event(&Event::Start(tag)).is_ok(),
+                "safe destination"
+            );
+        }
+        assert!(validate_event(&Event::End(TagEnd::Link)).is_ok());
+        assert!(validate_event(&Event::End(TagEnd::Image)).is_ok());
+    }
+
+    #[test]
+    fn test_validate_event_rejects_raw_html() {
+        // Both leaf HTML events and the HTML block start/end tags must fail
+        // with the raw-HTML message.
+        for ev in [
+            Event::Html("<div>".into()),
+            Event::InlineHtml("<em>".into()),
+            Event::Start(Tag::HtmlBlock),
+            Event::End(TagEnd::HtmlBlock),
+        ] {
+            let msg = format!("{:#}", validate_event(&ev).unwrap_err());
+            assert!(
+                msg.contains("raw HTML"),
+                "{ev:?} must be rejected as raw HTML, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_event_rejects_unsafe_destinations() {
+        for tag in [
+            Tag::Link {
+                link_type: pulldown_cmark::LinkType::Inline,
+                dest_url: "javascript:alert(1)".into(),
+                title: "".into(),
+                id: "".into(),
+            },
+            Tag::Link {
+                link_type: pulldown_cmark::LinkType::Inline,
+                dest_url: "//evil.com".into(),
+                title: "".into(),
+                id: "".into(),
+            },
+            Tag::Image {
+                link_type: pulldown_cmark::LinkType::Inline,
+                dest_url: "file:///etc/passwd".into(),
+                title: "".into(),
+                id: "".into(),
+            },
+        ] {
+            let msg = format!("{:#}", validate_event(&Event::Start(tag)).unwrap_err());
+            assert!(
+                msg.contains("unsafe link destination"),
+                "destination must be rejected, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_event_rejects_unsupported_structures() {
+        // Start tags for structures this application does not enable or
+        // support, and their matching closes, must never pass validation.
+        for tag in [
+            Tag::DefinitionList,
+            Tag::DefinitionListTitle,
+            Tag::DefinitionListDefinition,
+            Tag::Superscript,
+            Tag::Subscript,
+            Tag::MetadataBlock(pulldown_cmark::MetadataBlockKind::YamlStyle),
+        ] {
+            let event = Event::Start(tag);
+            let label = format!("{event:?}");
+            let msg = format!("{:#}", validate_event(&event).unwrap_err());
+            assert!(
+                msg.contains("unsupported markdown structure"),
+                "{label} must be rejected, got: {msg}"
+            );
+        }
+        for end in [
+            TagEnd::DefinitionList,
+            TagEnd::DefinitionListTitle,
+            TagEnd::DefinitionListDefinition,
+            TagEnd::Superscript,
+            TagEnd::Subscript,
+            TagEnd::MetadataBlock(pulldown_cmark::MetadataBlockKind::PlusesStyle),
+        ] {
+            let msg = format!("{:#}", validate_event(&Event::End(end)).unwrap_err());
+            assert!(
+                msg.contains("unsupported markdown structure"),
+                "{end:?} must be rejected, got: {msg}"
+            );
         }
     }
 
