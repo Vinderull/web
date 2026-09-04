@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, html};
 use serde::Deserialize;
 use time::macros::format_description;
 
@@ -233,27 +232,6 @@ fn render_markdown(markdown: &str) -> (String, String) {
                 out.push(Event::End(TagEnd::Heading(level)));
                 headings.push((level as u32, id, text));
             }
-            Event::Start(Tag::CodeBlock(kind)) => {
-                // Collect the fenced/indented code text and replace the block
-                // with syntax-highlighted HTML in this same pass.
-                let lang = match kind {
-                    CodeBlockKind::Fenced(info) => {
-                        info.split_whitespace().next().unwrap_or("").to_string()
-                    }
-                    CodeBlockKind::Indented => String::new(),
-                };
-                // Markdown can't nest code blocks: exactly one Text run (plus
-                // the matching End) sits between Start and End.
-                let mut code = String::new();
-                for ev in parser.by_ref() {
-                    match ev {
-                        Event::Text(t) => code.push_str(&t),
-                        Event::End(TagEnd::CodeBlock) => break,
-                        _ => {}
-                    }
-                }
-                out.push(Event::Html(highlight_code(&lang, &code).into()));
-            }
             other => out.push(other),
         }
     }
@@ -271,42 +249,7 @@ fn render_markdown(markdown: &str) -> (String, String) {
     (body, build_toc(&headings))
 }
 
-/// Highlight a fenced code block to classed HTML (`tok-*` spans). Colors come
-/// from the static stylesheet, not inline styles, so the `style-src 'self'`
-/// CSP stays intact. Wraps the result in `<pre><code>`. Unknown/no language
-/// falls back to Syntect's plain-text syntax (still HTML-escaped).
-fn highlight_code(lang: &str, code: &str) -> String {
-    use syntect::html::{ClassStyle, ClassedHTMLGenerator};
-    use syntect::parsing::SyntaxSet;
-    use syntect::util::LinesWithEndings;
-
-    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    let ss = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-
-    let syntax = ss
-        .find_syntax_by_token(lang)
-        .or_else(|| ss.find_syntax_by_extension(lang))
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
-
-    let mut generator = ClassedHTMLGenerator::new_with_class_style(
-        syntax,
-        ss,
-        ClassStyle::SpacedPrefixed { prefix: "tok-" },
-    );
-    for line in LinesWithEndings::from(code) {
-        if let Err(err) = generator.parse_html_for_line_which_includes_newline(line) {
-            eprintln!(
-                "Warning: syntect failed (lang={}); rendering code uncolored: {err}",
-                lang
-            );
-            return format!("<pre><code>{}</code></pre>", escape_html(code));
-        }
-    }
-    format!("<pre><code>{}</code></pre>", generator.finalize())
-}
-
-/// Escape `&`, `<`, `>` — used only for the syntect-failure fallback. Syntect
-/// itself escapes code on the happy path.
+/// Escape `&`, `<`, `>` — used when embedding heading text into the ToC HTML.
 fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -628,29 +571,34 @@ mod tests {
 
     #[test]
     fn test_render_markdown_code_block() {
+        // Ordinary fenced blocks render through pulldown-cmark as pre/code.
         let (html, _) = render_markdown("```\nlet x = 1;\n```");
-        assert!(html.contains("<code>"));
+        assert!(
+            html.contains("<pre><code>"),
+            "fenced block wrapped in pre/code: {html}"
+        );
         assert!(html.contains("let x = 1;"));
     }
 
     #[test]
-    fn test_render_markdown_highlights_fenced_rust() {
+    fn test_render_markdown_fenced_language_class() {
         let (html, _) = render_markdown("```rust\nfn main() { let x = 1; }\n```");
-        // A recognized token (e.g. `fn`) gets a syntect class, not inline style.
+        // The language id surfaces as pulldown-cmark's language-* class.
         assert!(
-            html.contains("class=\"tok-"),
-            "expected classed spans: {html}"
+            html.contains("class=\"language-rust\""),
+            "language class preserved: {html}"
         );
-        assert!(!html.contains("style=\""), "no inline styles (CSP): {html}");
-        assert!(html.contains("<pre><code>"));
+        assert!(html.contains("<pre><code"));
     }
 
     #[test]
-    fn test_render_markdown_escaping_and_unknown_lang() {
-        // Unknown language falls back to plain text but must stay escaped.
+    fn test_render_markdown_code_escaping() {
+        // Code content (regardless of language id) must be HTML-escaped.
         let (html, _) = render_markdown("```nope\n<a & b>\n```");
-        assert!(!html.contains("<a &"), "code must be escaped: {html}");
-        assert!(html.contains("&lt;a"));
+        assert!(!html.contains("<a &"), "raw HTML must be escaped: {html}");
+        assert!(html.contains("&lt;a"), "`<` escaped: {html}");
+        assert!(html.contains("&amp;"), "`&` escaped: {html}");
+        assert!(html.contains("&gt;"), "`>` escaped: {html}");
     }
 
     #[test]

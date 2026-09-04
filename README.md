@@ -8,7 +8,6 @@ Personal blog built with Rust, axum, and htmx.
 - **askama** 0.16 — compile-time HTML templates
 - **htmx** 4.0.0 — progressive enhancement (SPA-like navigation via `hx-boost`)
 - **pulldown-cmark** — Markdown rendering
-- **syntect** — syntax highlighting at load time
 - **ammonia** — HTML sanitization
 - **landlock** — Linux kernel sandboxing (filesystem + network restrictions)
 - **tower-http** — static file serving
@@ -30,8 +29,8 @@ Personal blog built with Rust, axum, and htmx.
 - **Previous/next navigation** — every post page links to the chronologically
   adjacent posts.
 - **Reading time** — estimated from word count, shown on each post.
-- **Syntax highlighting** — load-time `syntect` with CSS classes (no inline
-  styles), CSP-friendly.
+- **Code blocks** — fenced code is rendered and escaped by `pulldown-cmark`
+  into `<pre><code>` with no syntax coloring.
 - **Custom 404** — styled 404 page for unknown routes, slugs, and tags.
 - **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, `Permissions-Policy`, and a strict CSP on every
