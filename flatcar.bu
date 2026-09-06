@@ -175,16 +175,17 @@ storage:
 
 systemd:
   units:
-    # SSH daemon via socket activation (Flatcar default). A dropin on
-    # sshd.socket overrides the port to match sshd_config; sshd spins up
-    # on-demand per connection.
+    # SSH via a single persistent daemon. Flatcar's default socket activation
+    # (sshd.socket + Accept=yes) spawns one `sshd -i` per connection through
+    # the sshd@.service template; those per-connection processes linger as
+    # <defunct> zombies on the public-facing VPS when clients abort (port
+    # scanners, dropped sessions). Mask the socket and enable the long-lived
+    # sshd.service (sshd -D) instead; the port comes from `Port 49989` in
+    # sshd_config, not from the socket.
     - name: sshd.socket
-      dropins:
-        - name: 10-port.conf
-          contents: |
-            [Socket]
-            ListenStream=
-            ListenStream=49989
+      mask: true
+    - name: sshd.service
+      enabled: true
     # Enable linger for the web user so its systemd --user session starts at
     # boot without requiring a login.
     - name: enable-linger-web.service
