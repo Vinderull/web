@@ -15,12 +15,16 @@ FROM dev AS builder
 ARG MUSL_TARGET
 WORKDIR /build
 COPY . .
-# Buildkit cache mounts persist the cargo registry + target dir across builds,
-# so redeploys only recompile changed crates instead of the full tree.
+# Cache crates.io index, raw .crate archives, and git deps (the download
+# layer) plus the target dir across builds. Unpacked crate sources live only
+# in the container layer, so an interrupted unpack can never poison a
+# persistent cache. Explicit ids scope the buckets to this build.
 # The target dir is a cache mount (ephemeral, not in the image layer), so the
 # binary is copied out of it within the same RUN; a later COPY can't see it.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
+RUN --mount=type=cache,target=/usr/local/cargo/registry/index,id=cargo-index \
+    --mount=type=cache,target=/usr/local/cargo/registry/cache,id=cargo-cache \
+    --mount=type=cache,target=/usr/local/cargo/git/db,id=cargo-git \
+    --mount=type=cache,target=/build/target,id=web-target \
     cargo build --release --locked --target ${MUSL_TARGET} \
     && cp target/${MUSL_TARGET}/release/web /web
 
