@@ -203,24 +203,43 @@ systemd:
     # Enable the rootless podman-auto-update.timer in the web user session so
     # quadlet containers stay up to date. `Update=registry` in blog.container
     # makes it pull the latest image, then systemd restarts the generated
-    # quadlet units. Enabling the *user* timer (not the system one, which only
-    # sees rootful containers) means no manual `systemctl --user enable --now
-    # podman-auto-update.timer` on the box.
+    # quadlet units. Running via the *user* manager invokes podman as web, the
+    # identity that owns the rootless storage (the masked system timer must
+    # never touch it as root), so no manual `systemctl --user enable --now
+    # podman-auto-update.timer` is needed on the box.
     - name: enable-podman-auto-update-web.service
       enabled: true
       contents: |
         [Unit]
         Description=Enable rootless podman-auto-update.timer for web
-        # linger must be active first so the web user manager (and its
-        # /run/user/2000 bus) is up; runuser can then reach systemctl --user.
-        # Order-only: no lifecycle coupling to the linger service.
-        After=enable-linger-web.service
+        # Wants the web user manager up: linger only flags the user for a
+        # session, it does not wait for user@2000.service (which carries the
+        # /run/user/2000 bus systemctl --user needs).
+        Wants=user@2000.service
+        After=enable-linger-web.service user@2000.service
         [Service]
         Type=oneshot
         RemainAfterExit=yes
-        ExecStart=/usr/bin/runuser -u web -- systemctl --user enable --now podman-auto-update.timer
+        # runuser drops the caller's XDG_RUNTIME_DIR, so the bus vars must be
+        # passed explicitly — bare `systemctl --user` here fails with "no
+        # $XDG_RUNTIME_DIR / $DBUS_SESSION_BUS_ADDRESS defined".
+        ExecStart=/usr/bin/runuser -u web -- /usr/bin/env XDG_RUNTIME_DIR=/run/user/2000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/2000/bus /usr/bin/systemctl --user enable --now podman-auto-update.timer
         [Install]
         WantedBy=multi-user.target
+    # The podman sysext ships podman-auto-update.timer enabled by preset for
+    # the *system* manager too. Run as root, `podman auto-update` also walks
+    # rootless users' quadlets and opens the rootless user's storage as root —
+    # observed rewriting /var/lib/containers/storage-web/overlay-images/
+    # images.json with root:root 0600, locking web's storage out
+    # ("configure storage: open ... images.json: permission denied" on every
+    # quadlet unit at the next boot). The web user-session timer enables above
+    # (enable-podman-auto-update-web.service) is the correct mechanism and
+    # covers the whole pod; mask the system timer + service so no root process
+    # ever opens rootless storage again.
+    - name: podman-auto-update.timer
+      mask: true
+    - name: podman-auto-update.service
+      mask: true
     # Preemptive OOM handling on a 512MB box: kernel OOM kills semi-randomly
     # (often sshd, locking us out). oomd uses cgroup-v2 pressure to reap the
     # biggest memory user (the pod) first instead.
