@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
         with:
-          runCmd: cargo fmt --all -- --check
+          runCmd: just fmt-check
 
   test:
     name: test
@@ -41,8 +41,8 @@ jobs:
       - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
         with:
           runCmd: |
-            cargo build --locked
-            cargo test --locked
+            just build
+            just test
 
   htmx-vendor:
     name: htmx vendored file matches pinned release
@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
         with:
-          runCmd: cargo clippy --all-targets --locked -- -D warnings
+          runCmd: just clippy
 
   docker-build:
     name: Build application with docker
@@ -81,6 +81,17 @@ jobs:
       packages: write  # push to GHCR
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Authoritative pre-push gate: the release tag is `v` + the Cargo.toml
+      # package version. A mismatched tag (or a version bump not yet pushed)
+      # must never publish an image under the wrong name.
+      - name: Verify release tag matches Cargo.toml package version
+        run: |
+          crate_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          expected_tag="v${crate_version}"
+          if [ "${{ github.ref_name }}" != "$expected_tag" ]; then
+            echo "::error::release tag '${{ github.ref_name }}' does not match Cargo.toml package version '$expected_tag'; refusing to publish"
+            exit 1
+          fi
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Lowercase owner name
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
