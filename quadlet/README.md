@@ -208,9 +208,8 @@ A production update is then a one-liner — `Update=registry` re-pulls the
 `:latest` tag on restart:
 
 ```sh
-# dev machine — validate release metadata, optional preflight, then publish
+# dev machine — validate release metadata, then publish
 just release-version-check 1.2.3  # plain semver; must equal Cargo.toml (the only check `release` runs)
-just preflight                    # optional: rust-check in the devcontainer + htmx-check on the host
 just release 1.2.3                # only mutation: gh release create v1.2.3 --generate-notes --target main
 # vps (once CI's deploy job is green)
 sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
