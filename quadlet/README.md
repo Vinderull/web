@@ -19,9 +19,10 @@ own internal network, and the two containers reach each other on `127.0.0.1`.
 so Podman pulls the image from GHCR each time the service starts — no local build
 step is needed for deployment. CI (`.github/workflows/ci.yml`) builds the
 `runtime` image and pushes `ghcr.io/<owner>/web:latest` (plus `:<tag>`) whenever
-you publish a GitHub Release (against a `v*` tag). The image is keyless-signed
-with cosign; `policy.json` rejects any pull whose signature doesn't match the
-`ci.yml@refs/tags/v*` OIDC identity.
+you publish a GitHub Release (against a `v*` tag), after verifying the tag
+against `Cargo.toml`. The image is signed with key-based cosign (CI's
+`COSIGN_PRIVATE_KEY` secret); `policy.json` rejects any pull whose signature
+doesn't match `cosign.pub` (sigstoreSigned by key, not OIDC identity).
 
 The image is served from a **public** GHCR package (no auth token to manage or
 commit), gated only by the cosign signature in `policy.json`. To build
@@ -29,7 +30,7 @@ locally for testing and feed it to the quadlet, build the `runtime`
 target tagged to match `Image=`:
 
 ```sh
-podman build -f .devcontainer/Dockerfile --target runtime -t ghcr.io/vinderull/web:latest .
+just image_tag=ghcr.io/vinderull/web:latest image-build
 ```
 
 ## 2. Install the units
@@ -94,7 +95,7 @@ sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 ## Design notes
 - **Image source**: the units reference a pre-built image rather than building one. CI pushes the
   `runtime` image to `ghcr.io/<owner>/web:latest` (plus a versioned `:<tag>`,
-  keyless-signed with cosign) when you publish a GitHub Release (against a `v*`
+  signed with key-based cosign) when you publish a GitHub Release (against a `v*`
   tag); `blog.container`
   pulls it via `Update=registry`, so a deploy is just
   `systemctl --user restart blog`.
@@ -147,12 +148,14 @@ box. The cosign signature in `policy.json` remains the integrity gate.
 `flatcar.bu` (repo root) references the Caddyfile and quadlet units as local
 file includes — there is no `auth.json` or credential anywhere in the repo.
 Convert it with Butane and pass the result as the instance user-data when
-provisioning the VPS:
+provisioning the VPS. On a dev machine with Butane installed this is the
+`flatcar-render` recipe; `flatcar-check` validates with Butane's strict mode
+(the same command CI's `flatcar.yml` runs):
 
 ```sh
 # Install Butane: https://flatcar.org/docs/latest/provisioning/config-transpiler/
-# -d . resolves the `local:` file includes relative to the repo root.
-butane --pretty -d . flatcar.bu -o ignition.json
+just flatcar-check    # butane --strict --pretty -d . flatcar.bu -o /dev/null
+just flatcar-render   # butane --pretty -d . flatcar.bu -o ignition.json
 ```
 
 Most providers (Hetzner, DigitalOcean, Equinix, Vultr) accept `ignition.json` as
@@ -194,14 +197,15 @@ journalctl _UID=2000 -f
 > succeeds, and that the cosign signature matches `policy.json`.
 
 ### Updating the blog
-Publishing a GitHub Release (against a `v*` tag) triggers CI to build, push
-(`ghcr.io/vinderull/web:latest` plus a versioned `:<tag>`), and keyless-sign
-the image. A production update is then a one-liner — `Update=registry`
-re-pulls the `:latest` tag on restart:
+Publishing a GitHub Release (against a `v*` tag) triggers CI to validate,
+build, push (`ghcr.io/vinderull/web:latest` plus a versioned `:<tag>`), and
+sign the image with key-based cosign. A production update is then a one-liner
+— `Update=registry` re-pulls the `:latest` tag on restart:
 
 ```sh
-# dev machine — publish a release (creates/pushes the tag + fires CI)
-gh release create v1.2.3 --generate-notes
+# dev machine — verify + preflight, then publish (creates/pushes the tag + fires CI)
+just release-check 1.2.3     # version must equal Cargo.toml; runs rust-check in the devcontainer + htmx-check
+just release 1.2.3           # only mutation: gh release create v1.2.3 --generate-notes --target main
 # vps (once CI's deploy job is green)
 sudo -u web XDG_RUNTIME_DIR=/run/user/2000 systemctl --user restart blog
 ```

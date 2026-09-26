@@ -179,24 +179,36 @@ Startup order is deliberate (each step justifies the next):
 
 ### 8. Build & deployment layer
 - **Dockerfile** (`.devcontainer/Dockerfile`) — multi-stage: `dev` (devcontainer
-  toolchain + musl target), `builder` (`cargo build --release` against
-  `x86_64-unknown-linux-musl`), `runtime` (scratch, copies binary + `content/`,
-  bakes `CONTENT_DIR` via `ENV`, runs as UID 65532, `EXPOSE 3000`). The static
-  assets are compiled into the binary, so no `static/` copy or env var is
-  needed at runtime.
-  Final image ~2.3MB, no shell/libc/package-manager.
+  toolchain + musl target + `just` via the Debian package), `builder`
+  (`cargo build --release` against `x86_64-unknown-linux-musl`), `runtime`
+  (scratch, copies binary + `content/`, bakes `CONTENT_DIR` via `ENV`, runs as
+  UID 65532, `EXPOSE 3000`). The static assets are compiled into the binary,
+  so no `static/` copy or env var is needed at runtime. `just` never reaches
+  the scratch stage. Final image ~2.3MB, no shell/libc/package-manager.
+- **Justfile** — single source of truth for the Rust command flags (`--locked`,
+  clippy `-D warnings`, …), shared by the devcontainer and CI
+  (`devcontainers/ci` runs `just fmt-check` / `just build` + `just test` /
+  `just clippy`). Recipes are grouped by execution context: `devcontainer`
+  (cargo — run inside the container), `host` (podman image build/run/clean,
+  `butane --strict` flatcar check + render, `caddy fmt --diff` + validate,
+  vendored-htmx update/check), and `release` (version-gated
+  `release-check`/`release`). Host recipes need podman/butane/caddy/gh on the
+  host. Nothing in the Justfile pushes, signs, or attests images.
 - **Podman Quadlet** (`quadlet/`) — systemd units (`web.pod`,
   `blog.container`, `caddy.container`, `*.volume`) run the app + Caddy in one
   pod. Blog is reachable on `127.0.0.1:3000` inside the shared namespace;
   Caddy publishes 80/443 and proxies. Read-only roots, all caps dropped,
   `Restart=always`. Caddy self-gates routing on `/healthz`.
-- **CI** (`.github/workflows/ci.yml`) — fmt/test/clippy via devcontainers,
-  a `docker-build` job that smoke-tests the scratch `runtime` build, and a
-  release-triggered `deploy` job (fires on GitHub Release publish against a
-  `v*` tag) that builds+pushes the `runtime` image to
-  `ghcr.io/<owner>/web:latest` and `:<tag>`, then keyless-signs it with
-  cosign and attaches a SLSA provenance attestation. `policy.json` enforces
-  the signature on pull.
+- **CI** (`.github/workflows/ci.yml`) — for pull requests, the
+  `fmt`/`test`/`clippy` jobs run the Just recipes inside devcontainers, plus
+  an `htmx-vendor` job and a `docker-build` job that smoke-tests the scratch
+  `runtime` build with native Docker. These required checks gate merges to
+  `main`. The release-triggered `deploy` job verifies the release tag equals
+  `v` + the `Cargo.toml` package version, then builds and pushes the `runtime`
+  image to `ghcr.io/<owner>/web:latest` and `:<tag>`, signs it with key-based
+  cosign (`COSIGN_PRIVATE_KEY`, not keyless OIDC), and attaches a SLSA
+  provenance attestation. `policy.json` (sigstoreSigned, keyPath `cosign.pub`)
+  enforces the signature on pull.
 - **Flatcar** (`flatcar.bu`) — Ignition provisioning: writes the quadlet units
   and `Caddyfile` to `/etc`, enables the `flatcar-podman` sysext. The blog image
   is pulled from the **public** GHCR package by the quadlet (`Update=registry`,
