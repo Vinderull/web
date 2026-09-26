@@ -66,16 +66,34 @@ quadlet/           Podman Quadlet units (systemd-managed pod: blog + Caddy)
 ## Development
 
 Uses devcontainers. The same Dockerfile produces both the dev environment
-(target: `dev`) and the deployment image (final stage: `runtime`).
+(target: `dev`) and the deployment image (final stage: `runtime`). The
+`Justfile` at the repo root is the single source of truth for the Rust command
+flags, shared by the devcontainer and CI.
+
+`just` (no arguments) prints the grouped recipe list. The groups:
+
+| Group           | Runs where                          | Recipes |
+|-----------------|-------------------------------------|---------|
+| `devcontainer`  | inside the dev container (cargo)    | `build`, `run`, `test`, `fmt`, `fmt-check`, `clippy`, `rust-check`, `check` |
+| `host`          | on the host (podman, butane, caddy; devcontainer CLI for `preflight`) | `htmx-update`, `htmx-check`, `image-build`, `image-run`, `image-build-clean`, `flatcar-check`, `flatcar-render`, `caddy-check`, `preflight` |
+| `release`       | on the host (gh)                 | `release-version-check`, `release` |
+
+The `devcontainer` recipes run the Rust toolchain, which lives only inside
+the container; `host` recipes need their tools directly on the host (podman,
+butane, caddy; curl/openssl for htmx). `preflight` additionally needs the
+`devcontainer` CLI, and `release` needs `gh`. `just check` aggregates the full
+non-mutating verification: `rust-check` (fmt-check, build, test, clippy) plus
+`htmx-check`.
 
 ```bash
 # Build and start the dev container (mounts your workspace, installs toolchain)
 devcontainer up --workspace-folder .
 
-# Run commands inside the dev container
-devcontainer exec --workspace-folder . cargo build
-devcontainer exec --workspace-folder . cargo test
-devcontainer exec --workspace-folder . cargo run
+# Canonical Rust recipes, run inside the dev container
+devcontainer exec --workspace-folder . just fmt-check
+devcontainer exec --workspace-folder . just clippy
+devcontainer exec --workspace-folder . just test
+devcontainer exec --workspace-folder . just run
 # Server starts on http://localhost:3000
 ```
 
@@ -132,9 +150,14 @@ only the binary and content, running as a non-root user (UID 65532).
 already embedded in the binary at compile time, so no static directory is
 copied into the runtime image.
 
-CI (`.github/workflows/ci.yml`) builds the runtime image and pushes it to
-`ghcr.io/vinderull/web:latest` on each GitHub Release. The Quadlet units pull
-from GHCR (`Update=registry`), so no local build is needed for deployment.
+CI (`.github/workflows/ci.yml`) runs the required validation jobs (fmt/test/
+clippy via the Just recipes inside devcontainers, plus htmx-vendor and a native
+Docker build) on pull requests before they can merge to `main`. On a published
+GitHub Release, the release-only `deploy` job verifies the tag against
+`Cargo.toml` (the authoritative release-metadata gate, without rerunning the
+PR checks), then builds the runtime image and pushes it to
+`ghcr.io/vinderull/web:latest` (plus `:<tag>`). The Quadlet units pull from
+GHCR (`Update=registry`), so no local build is needed for deployment.
 
 ### Option A: Podman Quadlet + Caddy (recommended for production)
 
@@ -148,34 +171,55 @@ blog is not published to the host, so all external traffic goes through Caddy.
 See [`quadlet/README.md`](quadlet/README.md) for the full setup — rootless
 systemd Quadlet units and the Flatcar/VPS Ignition provisioning flow.
 
-To build locally (e.g. for testing before a release):
+To build locally (e.g. for testing before a release), tag the image to match
+what the quadlet pulls:
 
 ```bash
-podman build -t ghcr.io/vinderull/web:latest --target runtime -f .devcontainer/Dockerfile .
+just image_tag=ghcr.io/vinderull/web:latest image-build
 ```
 
 ### Option B: plain podman (no reverse proxy)
 
+The `host` Just recipes build and run the `runtime` image with podman (the
+Dockerfile lives in `.devcontainer/`):
+
 ```bash
-# The Dockerfile lives in .devcontainer/ — use -f to point to it
-podman build -t localhost/blog:latest --target runtime -f .devcontainer/Dockerfile .
+# Build only; defaults to tag localhost/blog:latest
+just image-build
 
-# Publish to the host on all interfaces (0.0.0.0)
+# Build, then run loopback-only (not exposed to the network): http://127.0.0.1:3000
+just image-run          # preferred for local dev
+
+# Same build after purging buildah's caches and intermediate images (--no-cache)
+just image-build-clean
+
+# Publish to the host on all interfaces (0.0.0.0) instead
 podman run --rm -p 3000:3000 localhost/blog:latest
-
-# Loopback-only: not exposed to the network. Prefer this for local dev.
-podman run --rm -p 127.0.0.1:3000:3000 localhost/blog:latest
-
 # Server starts on http://127.0.0.1:3000 (plain HTTP, no TLS)
 ```
 
-For local testing the [`build-run.sh`](build-run.sh) helper does both of those
-steps in one shot — it builds the `runtime` image and runs it loopback-only on
-`127.0.0.1:3000`:
+### Releasing
 
-```bash
-./build-run.sh
-```
+Releases are published from GitHub Actions, never locally — nothing in the
+Justfile builds, pushes, signs, or attests images. The required CI checks
+(fmt, test, clippy, htmx-vendor, docker-build) already gate every merge to
+`main`, so cutting a release does not rerun them.
+
+1. Bump `version` in `Cargo.toml` and commit.
+2. `just release-version-check 1.2.3` — release metadata validation only:
+   the argument must be plain semver and exactly equal the `Cargo.toml`
+   package version. This is the only check `release` runs.
+3. `just preflight` — optional full local checking before you publish:
+   `rust-check` inside the devcontainer (via `devcontainer up`/`exec`, no
+   host-local toolchain needed) plus `htmx-check` on the host. Not required —
+   the PR checks already covered this on every merge to `main`; use it for a
+   final sanity pass before cutting the tag.
+4. `just release 1.2.3` — the only mutating step:
+   `gh release create v1.2.3 --generate-notes --target main`. In Actions, the
+   release-only `deploy` job re-validates the tag against `Cargo.toml` — the
+   authoritative release-metadata gate, which PR CI cannot know — then builds,
+   pushes, signs, and attests the runtime image, without rerunning the PR
+   validation jobs.
 
 ## Configuration
 

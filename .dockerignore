@@ -17,6 +17,5 @@ tests
 Caddyfile
 LICENSE
 NOTICE
-build-run.sh
 ignition.json
 blog.tar
