@@ -75,15 +75,14 @@ flags, shared by the devcontainer and CI.
 | Group           | Runs where                          | Recipes |
 |-----------------|-------------------------------------|---------|
 | `devcontainer`  | inside the dev container (cargo)    | `build`, `run`, `test`, `fmt`, `fmt-check`, `clippy`, `rust-check`, `check` |
-| `host`          | on the host (podman, butane, caddy; devcontainer CLI for `preflight`) | `htmx-update`, `htmx-check`, `image-build`, `image-run`, `image-build-clean`, `flatcar-check`, `flatcar-render`, `caddy-check`, `preflight` |
+| `host`          | on the host (podman, butane, caddy) | `htmx-update`, `htmx-check`, `image-build`, `image-run`, `image-build-clean`, `flatcar-check`, `flatcar-render`, `caddy-check` |
 | `release`       | on the host (gh)                 | `release-version-check`, `release` |
 
 The `devcontainer` recipes run the Rust toolchain, which lives only inside
 the container; `host` recipes need their tools directly on the host (podman,
-butane, caddy; curl/openssl for htmx). `preflight` additionally needs the
-`devcontainer` CLI, and `release` needs `gh`. `just check` aggregates the full
-non-mutating verification: `rust-check` (fmt-check, build, test, clippy) plus
-`htmx-check`.
+butane, caddy; curl/openssl for htmx), and `release` needs `gh`. `just check`
+aggregates the full non-mutating verification: `rust-check` (fmt-check, build,
+test, clippy) plus `htmx-check`.
 
 ```bash
 # Build and start the dev container (mounts your workspace, installs toolchain)
@@ -209,12 +208,7 @@ Justfile builds, pushes, signs, or attests images. The required CI checks
 2. `just release-version-check 1.2.3` — release metadata validation only:
    the argument must be plain semver and exactly equal the `Cargo.toml`
    package version. This is the only check `release` runs.
-3. `just preflight` — optional full local checking before you publish:
-   `rust-check` inside the devcontainer (via `devcontainer up`/`exec`, no
-   host-local toolchain needed) plus `htmx-check` on the host. Not required —
-   the PR checks already covered this on every merge to `main`; use it for a
-   final sanity pass before cutting the tag.
-4. `just release 1.2.3` — the only mutating step:
+3. `just release 1.2.3` — the only mutating step:
    `gh release create v1.2.3 --generate-notes --target main`. In Actions, the
    release-only `deploy` job re-validates the tag against `Cargo.toml` — the
    authoritative release-metadata gate, which PR CI cannot know — then builds,

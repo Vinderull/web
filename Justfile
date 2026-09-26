@@ -56,7 +56,7 @@ rust-check: fmt-check build test clippy
 [group('devcontainer')]
 check: rust-check htmx-check
 
-# ── host: run on the host (podman, butane, caddy, gh, devcontainer CLI) ──────
+# ── host: run on the host (podman, buildah, butane, caddy) ──────────────────
 
 # htmx-update: refetch and vendor the pinned htmx release (mutates static/js/htmx.min.js)
 [group('host')]
@@ -105,13 +105,6 @@ flatcar-render:
 caddy-check:
     caddy fmt --diff Caddyfile
     caddy validate --config Caddyfile --adapter caddyfile
-
-# preflight: optionally run rust-check in the devcontainer and htmx-check on the host
-[group('host')]
-preflight:
-    devcontainer up --workspace-folder .
-    devcontainer exec --workspace-folder . just rust-check
-    just htmx-check
 
 # ── release: version-gated publish (mutation is explicit, never default) ───
 

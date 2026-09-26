@@ -191,12 +191,10 @@ Startup order is deliberate (each step justifies the next):
   `just clippy`). Recipes are grouped by execution context: `devcontainer`
   (cargo — run inside the container), `host` (podman image build/run/clean,
   `butane --strict` flatcar check + render, `caddy fmt --diff` + validate,
-  vendored-htmx update/check, and `preflight` — the optional full local
-  check: `rust-check` in the devcontainer via the `devcontainer` CLI plus
-  `htmx-check` on the host), and `release` (`release-version-check`, the
-  release-metadata check, and `release`, the publish step). Host recipes need
-  podman/butane/caddy/gh on the host. Nothing in the Justfile pushes, signs,
-  or attests images.
+  vendored-htmx update/check), and `release` (`release-version-check` and the
+  `release` publish step via `gh release create`). Host recipes require their
+  corresponding podman/buildah, butane, Caddy, curl, and OpenSSL tools;
+  release requires gh. Nothing in the Justfile pushes, signs, or attests images.
 - **Podman Quadlet** (`quadlet/`) — systemd units (`web.pod`,
   `blog.container`, `caddy.container`, `*.volume`) run the app + Caddy in one
   pod. Blog is reachable on `127.0.0.1:3000` inside the shared namespace;
