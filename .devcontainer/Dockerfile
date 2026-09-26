@@ -4,7 +4,10 @@ ARG MUSL_TARGET="x86_64-unknown-linux-musl"
 # ---- Dev stage (devcontainer base; toolchain source for builder) ----
 FROM mcr.microsoft.com/devcontainers/rust:${VARIANT} AS dev
 ARG MUSL_TARGET
-RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
+# just (Debian package, trixie): the Justfile is the single source of truth
+# for the cargo flags the devcontainer and CI run. Stays in the dev/builder
+# stages — the scratch runtime image contains only the static binary + content.
+RUN apt-get update && apt-get install -y --no-install-recommends just musl-tools \
     && rm -rf /var/lib/apt/lists/* \
     && rustup target add ${MUSL_TARGET}
 
