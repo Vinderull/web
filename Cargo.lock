@@ -752,7 +752,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "web"
-version = "0.5.13"
+version = "0.5.14"
 dependencies = [
  "anyhow",
  "askama",
