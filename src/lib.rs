@@ -52,6 +52,11 @@ pub const CSP_VALUE: &str = "default-src 'none'; base-uri 'none'; connect-src 's
 /// every origin.
 pub const PERMISSIONS_POLICY_VALUE: &str = "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), document-domain=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()";
 
+/// Cache-Control for pre-rendered immutable responses (every HTML page
+/// and the Atom feed): 12h client + shared-cache lifetime, no
+/// revalidation needed while the deploy is up.
+const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=43200, s-maxage=43200, immutable";
+
 // The three static assets are embedded into the binary at compile time, so the
 // request path never touches the filesystem: `include_bytes!` bakes the exact
 // vendored source bytes in, and each route serves them from RAM with a static,
@@ -113,6 +118,32 @@ async fn method_guard(req: Request, next: Next) -> Response {
     }
 }
 
+/// Pre-render every post page (keyed by slug) with its prev/next nav.
+/// The slice is sorted newest-first, so `[i - 1]` is the chronologically
+/// newer neighbor and `[i + 1]` the older one; the first post has no newer
+/// and the last no older neighbor. Shared by `build_app` and the tests so
+/// the nav logic cannot drift between them.
+fn build_post_pages(
+    posts: &[posts::Post],
+) -> anyhow::Result<HashMap<String, (Bytes, HeaderValue)>> {
+    let mut pages = HashMap::with_capacity(posts.len());
+    for (i, p) in posts.iter().enumerate() {
+        let newer = (i > 0).then(|| &posts[i - 1]);
+        let older = (i + 1 < posts.len()).then(|| &posts[i + 1]);
+        let html = PostTemplate {
+            post: p,
+            newer,
+            older,
+            site_name: SITE_NAME,
+        }
+        .render()
+        .with_context(|| format!("rendering post {}", p.slug))?;
+        let etag = etag_for(html.as_bytes());
+        pages.insert(p.slug.clone(), (Bytes::from(html), etag));
+    }
+    Ok(pages)
+}
+
 /// Build the application router from loaded posts.
 ///
 /// Pre-renders the index, every post page, the tag index, and every tag page
@@ -144,23 +175,8 @@ pub fn build_app(
         .context("rendering 404 template")?,
     );
 
-    let mut post_pages = HashMap::with_capacity(posts.len());
     let posts_slice = posts.as_slice();
-    for (i, p) in posts_slice.iter().enumerate() {
-        let newer = (i > 0).then(|| &posts_slice[i - 1]);
-        let older = (i + 1 < posts_slice.len()).then(|| &posts_slice[i + 1]);
-        let html = PostTemplate {
-            post: p,
-            newer,
-            older,
-            site_name: SITE_NAME,
-        }
-        .render()
-        .with_context(|| format!("rendering post {}", p.slug))?;
-        let etag = etag_for(html.as_bytes());
-        post_pages.insert(p.slug.clone(), (Bytes::from(html), etag));
-    }
-    let post_pages = Arc::new(post_pages);
+    let post_pages = Arc::new(build_post_pages(posts_slice)?);
 
     // Precompute a lowercased search haystack per post, index-aligned with
     // `posts`, so search never re-allocates or re-lowercases the corpus on the
@@ -340,21 +356,12 @@ async fn static_favicon() -> Response {
 
 async fn feed(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if etag_matches(&headers, &state.feed_etag) {
-        // 304 mirrors the selected representation's metadata (ETag +
-        // Cache-Control) with an empty body and no Content-Type.
-        let mut resp = StatusCode::NOT_MODIFIED.into_response();
-        resp.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
-        );
-        resp.headers_mut()
-            .insert(header::ETAG, state.feed_etag.clone());
-        return resp;
+        return not_modified(&state.feed_etag);
     }
     let mut resp = Response::new(Body::from(state.feed_xml.clone()));
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
+        HeaderValue::from_static(CACHE_CONTROL_IMMUTABLE),
     );
     resp.headers_mut()
         .insert(header::ETAG, state.feed_etag.clone());
@@ -570,24 +577,29 @@ fn is_etagc(b: u8) -> bool {
     b == 0x21 || (0x23..=0x7E).contains(&b) || b >= 0x80
 }
 
+/// 304 mirroring the selected representation's metadata (ETag +
+/// Cache-Control) with an empty body and no Content-Type. Shared by the
+/// HTML page handlers and the Atom feed handler.
+fn not_modified(etag: &HeaderValue) -> Response {
+    let mut resp = StatusCode::NOT_MODIFIED.into_response();
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(CACHE_CONTROL_IMMUTABLE),
+    );
+    resp.headers_mut().insert(header::ETAG, etag.clone());
+    resp
+}
+
 /// Build a weakly-caching HTML response: 304 on matching `If-None-Match`,
 /// otherwise the body with `Cache-Control` + `ETag` headers.
 fn cached_html(headers: HeaderMap, body: Bytes, etag: HeaderValue) -> Response {
     if etag_matches(&headers, &etag) {
-        // 304 mirrors the selected representation's metadata (ETag +
-        // Cache-Control) with an empty body and no Content-Type.
-        let mut resp = StatusCode::NOT_MODIFIED.into_response();
-        resp.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
-        );
-        resp.headers_mut().insert(header::ETAG, etag);
-        return resp;
+        return not_modified(&etag);
     }
     let mut resp = Response::new(Body::from(body));
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=43200, s-maxage=43200, immutable"),
+        HeaderValue::from_static(CACHE_CONTROL_IMMUTABLE),
     );
     resp.headers_mut().insert(header::ETAG, etag);
     resp.headers_mut().insert(
@@ -792,27 +804,6 @@ mod tests {
         assert_eq!(etag_for(b"hello").to_str().unwrap(), "\"9555e8555c62dcfd\"");
     }
 
-    // The post route is now a pure lookup against pre-rendered pages; this
-    // mirrors the boot pipeline and guards against regressions there.
-    fn build_post_pages(posts: &[posts::Post]) -> HashMap<String, (Bytes, HeaderValue)> {
-        let mut map = HashMap::new();
-        for (i, p) in posts.iter().enumerate() {
-            let newer = (i > 0).then(|| &posts[i - 1]);
-            let older = (i + 1 < posts.len()).then(|| &posts[i + 1]);
-            let html = PostTemplate {
-                post: p,
-                newer,
-                older,
-                site_name: SITE_NAME,
-            }
-            .render()
-            .unwrap();
-            let etag = etag_for(html.as_bytes());
-            map.insert(p.slug.clone(), (Bytes::from(html), etag));
-        }
-        map
-    }
-
     fn fake_post(slug: &str) -> posts::Post {
         posts::Post {
             slug: slug.to_string(),
@@ -835,7 +826,7 @@ mod tests {
             fake_post("middle"),
             fake_post("oldest"),
         ];
-        let pages = build_post_pages(&posts);
+        let pages = build_post_pages(&posts).unwrap();
 
         let newest = String::from_utf8(pages["newest"].0.to_vec()).unwrap();
         assert!(
@@ -865,7 +856,7 @@ mod tests {
     #[test]
     fn single_post_has_no_nav() {
         let posts = vec![fake_post("only")];
-        let pages = build_post_pages(&posts);
+        let pages = build_post_pages(&posts).unwrap();
         let html = String::from_utf8(pages["only"].0.to_vec()).unwrap();
         assert!(!html.contains("post-nav"), "single post should have no nav");
     }
@@ -889,7 +880,7 @@ mod tests {
         if posts.is_empty() {
             return;
         }
-        let pages = build_post_pages(&posts);
+        let pages = build_post_pages(&posts).unwrap();
         for p in &posts {
             let (html, etag) = pages
                 .get(&p.slug)
@@ -910,7 +901,6 @@ mod tests {
         }
         let haystacks = build_haystacks(&posts);
         // Every post must match an empty query.
-        assert_eq!(search_posts_with(&posts, &haystacks, "").len(), posts.len());
         assert_eq!(search_posts_with(&posts, &haystacks, "").len(), posts.len());
 
         // A title match, including a case-insensitive variant.

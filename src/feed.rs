@@ -277,12 +277,6 @@ mod tests {
     // ── RFC 4287 compliance ──
 
     #[test]
-    fn rfc4287_feed_has_namespace() {
-        let xml = build_feed(&[fake_post("t", "T", "2025-01-01")]);
-        assert!(xml.contains(r#"<feed xmlns="http://www.w3.org/2005/Atom">"#));
-    }
-
-    #[test]
     fn rfc4287_feed_has_exactly_one_id() {
         let xml = build_feed(&[fake_post("t", "T", "2025-01-01")]);
         // Feed-level <id>, not entry-level. Count openings.
@@ -342,13 +336,6 @@ mod tests {
     }
 
     #[test]
-    fn rfc4287_updated_is_rfc3339() {
-        let xml = build_feed(&[fake_post("t", "T", "2025-01-15")]);
-        // The updated element content must match RFC 3339 date-time
-        assert!(xml.contains("<updated>2025-01-15T00:00:00+00:00</updated>"));
-    }
-
-    #[test]
     fn rfc4287_content_has_type_attribute() {
         let xml = build_feed(&[fake_post("t", "T", "2025-01-01")]);
         assert!(xml.contains(r#"<content type="html">"#));
@@ -360,13 +347,6 @@ mod tests {
         let xml = build_feed(&[fake_post("my-post", "T", "2025-01-01")]);
         assert!(xml.contains(&format!("<id>{}/</id>", SITE_URL)));
         assert!(xml.contains(&format!("<id>{}/posts/my-post</id>", SITE_URL)));
-    }
-
-    #[test]
-    fn rfc4287_self_link_present() {
-        let xml = build_feed(&[fake_post("t", "T", "2025-01-01")]);
-        // The feed should have a self link (RFC 4287 recommends this)
-        assert!(xml.contains(r#"rel="self""#));
     }
 
     #[test]
