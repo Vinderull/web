@@ -1,6 +1,6 @@
 [package]
 name = "web"
-version = "0.5.14"
+version = "0.5.15"
 edition = "2024"
 
 [dependencies]
@@ -31,3 +31,8 @@ http-body-util = "0.1"
 # the runtime binary (and the scratch image).
 # The default `std` feature is unused (Digest::digest works no_std).
 sha2 = { version = "0.11", default-features = false }
+# base64: encode the pinned SHA-384 digest in the integration test's SRI
+# integrity check. Dev-deps stay out of the runtime binary (and the scratch
+# image), same rationale as sha2 above. (Hex needs no crate: a two-line
+# local encoder lives in tests/server.rs.)
+base64 = "0.23"

@@ -9,11 +9,10 @@ fn main() -> anyhow::Result<()> {
     let loaded_posts = posts::load_all(&config.content_dir)?;
     println!("Loaded {} posts", loaded_posts.len());
 
-    // Load standalone pages alongside posts, before sandboxing (landlock
-    // denies all further filesystem reads once applied).
-    let about_page = posts::load_pages(&config.content_dir)?
-        .into_iter()
-        .find(|p| p.slug == "about");
+    // Load the standalone about page before sandboxing (landlock denies
+    // all further filesystem reads once applied). Its absence is not an
+    // error — the `/about` route just 404s.
+    let about_page = posts::load_about(&config.content_dir)?;
 
     // Bind listener before applying landlock (landlock would block bind on V4+)
     let listener = std::net::TcpListener::bind(&config.bind_addr)?;

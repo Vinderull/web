@@ -81,43 +81,21 @@ pub fn load_all(content_dir: &Path) -> Result<Vec<Post>> {
     Ok(posts)
 }
 
-/// Load standalone pages from `content/pages/*.md`. Same markdown pipeline as
-/// posts, but frontmatter only carries a `title` (no date/tags). Returns an
-/// empty vec if `content/pages` doesn't exist.
-pub fn load_pages(content_dir: &Path) -> Result<Vec<Page>> {
-    let pages_dir = content_dir.join("pages");
-    let mut pages = Vec::new();
-
-    if !pages_dir.exists() {
-        eprintln!(
-            "Warning: pages directory not found: {}",
-            pages_dir.display()
-        );
-        return Ok(pages);
+/// Load the standalone `content/pages/about.md` as a [`Page`], or `None`
+/// when the file does not exist — the `/about` route then 404s. Only
+/// `/about` is routed, so no other page file is loaded or parsed. Read once
+/// at startup, before the landlock sandbox denies filesystem reads.
+pub fn load_about(content_dir: &Path) -> Result<Option<Page>> {
+    let path = content_dir.join("pages").join("about.md");
+    if !path.exists() {
+        eprintln!("Warning: about page not found: {}", path.display());
+        return Ok(None);
     }
-
-    for entry in std::fs::read_dir(&pages_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-
-        let slug = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .context("invalid filename")?
-            .to_string();
-
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
-
-        let page =
-            parse_page(&slug, &content).with_context(|| format!("parsing {}", path.display()))?;
-        pages.push(page);
-    }
-
-    Ok(pages)
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let page =
+        parse_page("about", &content).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(Some(page))
 }
 
 fn parse_page(slug: &str, content: &str) -> Result<Page> {
@@ -1224,28 +1202,24 @@ mod tests {
     }
 
     #[test]
-    fn test_load_pages_missing_dir_returns_empty() {
+    fn test_load_about_missing_file_returns_none() {
         let dir = TempDir::new();
-        let pages = load_pages(dir.path()).unwrap();
-        assert!(pages.is_empty());
+        assert!(load_about(dir.path()).unwrap().is_none());
     }
 
     #[test]
-    fn test_load_pages_parses_markdown_and_ignores_non_md() {
+    fn test_load_about_parses_markdown() {
         let dir = TempDir::new();
         let pages_subdir = dir.path().join("pages");
         std::fs::create_dir_all(&pages_subdir).unwrap();
-
         std::fs::write(
             pages_subdir.join("about.md"),
             "+++\ntitle = \"About Me\"\n+++\nHello **world**.",
         )
         .unwrap();
-        std::fs::write(pages_subdir.join("readme.txt"), "ignore").unwrap();
-        let pages = load_pages(dir.path()).unwrap();
-        assert_eq!(pages.len(), 1);
-        assert_eq!(pages[0].slug, "about");
-        assert_eq!(pages[0].title, "About Me");
-        assert!(pages[0].html.contains("<strong>world</strong>"));
+        let page = load_about(dir.path()).unwrap().expect("about page");
+        assert_eq!(page.slug, "about");
+        assert_eq!(page.title, "About Me");
+        assert!(page.html.contains("<strong>world</strong>"));
     }
 }

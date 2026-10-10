@@ -89,8 +89,8 @@ parsing):
 - `tags.html` / `tag.html` — extends `base`; the former lists every tag (with
   post counts) linking to `/tags/{tag}`, the latter lists the posts for one tag.
   Both pre-rendered at boot.
-- `page.html` — extends `base`, renders a standalone page (e.g. `/about`) from
-  `content/pages/*.md`. Pages have no date/tags/ToC/reading time.
+- `page.html` — extends `base`, renders the standalone `/about` page from
+  `content/pages/about.md`. Pages have no date/tags/ToC/reading time.
 - `search_results.html` — bare fragment (no `<html>`): `<ul>` of matching
   posts, used by htmx search swaps. Includes an empty-state message when no
   posts match.
