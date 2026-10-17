@@ -1,5 +1,11 @@
+# Default target: static musl binary (matches the Dockerfile builder and the
+# scratch runtime image). Explicit `--target` flags, release builds, and the
+# devcontainer's rustup-installed target all override/align with this.
+[build]
+target = "x86_64-unknown-linux-musl"
+
 [target.x86_64-unknown-linux-musl]
-linker = "musl-gcc"
+linker = "rust-lld"
 
 [profile.release]
 opt-level = "s"     # Optimize for size
