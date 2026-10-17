@@ -7,7 +7,7 @@ ARG MUSL_TARGET
 # just (Debian package, trixie): the Justfile is the single source of truth
 # for the cargo flags the devcontainer and CI run. Stays in the dev/builder
 # stages — the scratch runtime image contains only the static binary + content.
-RUN apt-get update && apt-get install -y --no-install-recommends just musl-tools \
+RUN apt-get update && apt-get install -y --no-install-recommends just \
     && rm -rf /var/lib/apt/lists/* \
     && rustup target add ${MUSL_TARGET}
 
