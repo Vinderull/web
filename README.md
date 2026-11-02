@@ -6,7 +6,7 @@ Personal blog built with Rust, axum, and htmx.
 
 - **axum** 0.8 — HTTP server
 - **askama** 0.16 — compile-time HTML templates
-- **htmx** 4.0.0 — progressive enhancement (SPA-like navigation via `hx-boost`)
+- **htmx** 4.0.1 — progressive enhancement (SPA-like navigation via `hx-boost`)
 - **pulldown-cmark** — simple-Markdown rendering: raw HTML and unsafe
   link/image destinations are rejected at startup; validated events render
   directly to HTML (no post-render sanitizer)

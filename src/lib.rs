@@ -42,10 +42,10 @@ pub const SITE_AUTHOR: &str = "Ryan Dufour";
 /// Least privilege: `default-src 'none'` denies every resource class unless
 /// explicitly allowed. Only same-origin scripts (the `/static/js/htmx.min.js`
 /// bundle; no inline scripts are used), styles, images (incl. the SVG
-/// favicon), and HTMX fetch/connect traffic are permitted. `base-uri 'none'`
-/// blocks `<base>` injection, `form-action 'none'` blocks form submission,
-/// and `frame-ancestors 'none'` forbids framing.
-pub const CSP_VALUE: &str = "default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self'; script-src 'self'; style-src 'self'";
+/// favicon), HTMX fetch/connect traffic, and form submissions are permitted.
+/// `base-uri 'none'` blocks `<base>` injection and `frame-ancestors 'none'`
+/// forbids framing.
+pub const CSP_VALUE: &str = "default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self'; script-src 'self'; style-src 'self'";
 
 /// Permissions-Policy header value applied to every HTML response.
 /// The site uses none of these browser capabilities, so they are denied to

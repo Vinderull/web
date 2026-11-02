@@ -133,9 +133,10 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
 - Cached routes set `Cache-Control: public, max-age=43200, s-maxage=43200, immutable`.
 - Security headers on every HTML response: `X-Content-Type-Options: nosniff`,
   `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`,
-  `Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'`.
+  and a default-deny Content Security Policy that permits only same-origin
+  scripts, styles, images, HTMX connections, and form submissions.
 
-### 5. Frontend layer — htmx 4.0.0 + CSS (`static/`)
+### 5. Frontend layer — htmx 4.0.1 + CSS (`static/`)
 The repo's `static/` directory is a **compile-time source**: `main.css`,
 `htmx.min.js`, and `favicon.svg` are embedded into the binary with
 `include_bytes!` and served from RAM at their exact `/static/...` URLs, so no
