@@ -21,8 +21,8 @@
 # pinned release without writing anything, catching hand edits.
 set -euo pipefail
 
-VERSION="4.0.0"
-SHA256="e484d9171a9db30a39c8f16e3d709d4137f3211c659f8e6125816635033d593f"
+VERSION="4.0.1"
+SHA256="a0abb04f2f45a1f89d1d4844023245537e5e6014c87b144553e0607b4cc32130"
 URL="https://unpkg.com/htmx.org@${VERSION}/dist/htmx.min.js"
 OUT="static/js/htmx.min.js"
 
