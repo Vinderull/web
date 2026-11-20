@@ -269,14 +269,14 @@ async fn static_htmx_matches_sri_integrity() {
         Sha384::digest(&body).into()
     };
 
-    let expected_sha256 = "a0abb04f2f45a1f89d1d4844023245537e5e6014c87b144553e0607b4cc32130";
+    let expected_sha256 = "fd25ba3fe5e44768756f23862a6daa4f928192199a121e825e882e719bc8aabd";
     assert_eq!(
         hex(&sha256),
         expected_sha256,
         "served htmx.min.js must be the pinned release from scripts/update-htmx.sh"
     );
 
-    let expected_integrity = "Qp9rdC8H7EqOoX+nR0P3RPG2Noji+qdwJlGpfzwQJsfOpp3sGwIdSP9xO3+UlEhn";
+    let expected_integrity = "6NzMyCdh08UZ4b4M17SJJKQLdDijx4z2IqqKLKD0Q/PzCFQLpFuk3konY0WgqbTy";
     assert_eq!(
         STANDARD.encode(sha384),
         expected_integrity,

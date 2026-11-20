@@ -136,7 +136,7 @@ hashmap lookups + ETag comparisons — no per-request Askama rendering.
   and a default-deny Content Security Policy that permits only same-origin
   scripts, styles, images, HTMX connections, and form submissions.
 
-### 5. Frontend layer — htmx 4.0.1 + CSS (`static/`)
+### 5. Frontend layer — htmx 4.0.2 + CSS (`static/`)
 The repo's `static/` directory is a **compile-time source**: `main.css`,
 `htmx.min.js`, and `favicon.svg` are embedded into the binary with
 `include_bytes!` and served from RAM at their exact `/static/...` URLs, so no
